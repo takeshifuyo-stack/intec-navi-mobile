@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<!-- 業務ナビ スマホ版の画面(GitHub Pages に置く)。中身は Google(apps-script/navi-mobile/Code.gs の doPost ?c=…)。
+     apps-script/navi-mobile/Index.html を元に、通信の部分だけを fetch に差し替えたもの。画面を直すときは両方を合わせる -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>業務ナビ(スマホ版)</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #fff; --ink: #1d2733; --sub: #5b6875; --line: #d9e0e6;
+    --accent: #0f766e; --accent-ink: #fff; --warn-bg: #fff7d1; --warn-ink: #6b5200;
+    --urgent: #c62828; --new: #1565c0; --done-bg: #e7f5ec; --done-ink: #1b5e20; --later-bg: #eef1f5;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; -webkit-text-size-adjust: 100%; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--accent); color: #fff; padding: 10px 16px calc(10px) 16px; padding-top: max(10px, env(safe-area-inset-top)); }
+  header h1 { margin: 0; font-size: 18px; }
+  header .meta { font-size: 13px; opacity: .9; }
+  .tabs { display: flex; gap: 6px; margin-top: 8px; }
+  .tabs button { flex: 1; border: 0; border-radius: 8px; padding: 8px 4px; font-size: 14px; background: rgba(255,255,255,.18); color: #fff; }
+  .tabs button.on { background: #fff; color: var(--accent); font-weight: bold; }
+  main { padding: 12px 16px 80px; max-width: 720px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card.answered { border-color: #9fd3b0; }
+  .badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; font-size: 12px; }
+  .badge { border-radius: 999px; padding: 1px 8px; border: 1px solid var(--line); color: var(--sub); }
+  .badge.urgent { color: #fff; background: var(--urgent); border-color: var(--urgent); }
+  .badge.new { color: #fff; background: var(--new); border-color: var(--new); }
+  .badge.done { color: var(--done-ink); background: var(--done-bg); border-color: #9fd3b0; }
+  .badge.later { background: var(--later-bg); }
+  h2 { margin: 0 0 6px; font-size: 17px; }
+  .blocks { background: var(--warn-bg); color: var(--warn-ink); border-radius: 8px; padding: 6px 10px; font-size: 14px; margin: 6px 0; }
+  .q { white-space: pre-wrap; margin: 6px 0; }
+  details.ctx { margin: 6px 0; font-size: 14px; color: var(--sub); }
+  details.ctx summary { cursor: pointer; color: var(--accent); }
+  .ctx-body { white-space: pre-wrap; }
+  .look { margin: 8px 0; }
+  .look-label { font-size: 13px; color: var(--sub); margin-bottom: 2px; }
+  .xl { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: 6px; }
+  .xl table { border-collapse: collapse; font-size: 12px; }
+  .xl th, .xl td { border: 1px solid var(--line); padding: 2px 5px; white-space: nowrap; }
+  .xl th { background: #eef1f5; color: var(--sub); font-weight: normal; position: sticky; left: 0; }
+  .xl td.hit { background: #fff1b8; font-weight: bold; }
+  .look-note { font-size: 13px; color: var(--sub); }
+  .look-warn { color: var(--warn-ink); background: var(--warn-bg); border-radius: 6px; padding: 2px 8px; margin-top: 4px; }
+  .choices { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .choice { text-align: left; border: 2px solid var(--line); background: #fff; border-radius: 10px; padding: 10px 12px; font-size: 15px; color: var(--ink); }
+  .choice.sel { border-color: var(--accent); background: #e6f4f2; font-weight: bold; }
+  textarea { width: 100%; min-height: 72px; font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-top: 6px; }
+  .row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn { border: 0; border-radius: 10px; padding: 10px 14px; font-size: 15px; background: var(--accent); color: var(--accent-ink); }
+  .btn.sub { background: #e6eaee; color: var(--ink); }
+  .btn:disabled { opacity: .45; }
+  .done-box { background: var(--done-bg); color: var(--done-ink); border-radius: 8px; padding: 8px 10px; margin-top: 10px; font-size: 14px; }
+  .empty { text-align: center; color: var(--sub); padding: 40px 0; }
+  .login { max-width: 360px; margin: 40px auto; text-align: center; }
+  .pin-dots { display: flex; justify-content: center; gap: 10px; margin: 18px 0; }
+  .pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--accent); }
+  .pin-dot.on { background: var(--accent); }
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .pad button { font-size: 24px; padding: 14px 0; border-radius: 12px; border: 1px solid var(--line); background: #fff; color: var(--ink); }
+  .err { color: var(--urgent); min-height: 1.6em; font-size: 14px; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: max(16px, env(safe-area-inset-bottom)); background: #263238; color: #fff; border-radius: 10px; padding: 10px 14px; font-size: 14px; z-index: 20; }
+  #busy { position: fixed; top: 0; left: 0; right: 0; height: 3px; background: #ffb300; z-index: 30; }
+  .help { font-size: 13px; color: var(--sub); margin: 0 0 12px; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #11161b; --card: #1a2128; --ink: #e6edf3; --sub: #9aa7b3; --line: #2c3640; --warn-bg: #3a3214; --warn-ink: #f5dd8a; --done-bg: #16301f; --done-ink: #a5d6b0; --later-bg: #222b33; }
+    .choice, .pad button, textarea { background: #12181e; color: var(--ink); }
+    .choice.sel { background: #123a36; }
+    .xl th { background: #222b33; }
+    .xl td.hit { background: #4a3f0f; }
+    .btn.sub { background: #2c3640; color: var(--ink); }
+  }
+</style>
+</head>
+<body>
+<div id="busy" hidden></div>
+<header id="hdr" hidden>
+  <h1>業務ナビ(スマホ版)</h1>
+  <div class="meta" id="meta"></div>
+  <div class="tabs" role="tablist">
+    <button type="button" data-tab="todo" class="on">未回答</button>
+    <button type="button" data-tab="later">会社で確認</button>
+    <button type="button" data-tab="done">答えた</button>
+  </div>
+</header>
+
+<section class="login" id="login">
+  <h1 style="font-size:20px">業務ナビ(スマホ版)</h1>
+  <p class="help">暗証番号(8桁)を入れてください</p>
+  <div class="pin-dots" id="dots"></div>
+  <div class="err" id="loginErr"></div>
+  <div class="pad" id="pad">
+    <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
+    <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
+    <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
+    <button type="button" data-k="" disabled></button><button type="button" data-k="0">0</button><button type="button" id="del">消す</button>
+  </div>
+</section>
+
+<main id="main" hidden>
+  <p class="help" id="help"></p>
+  <div id="list"></div>
+</main>
+<div id="toast" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  var PIN_LEN = 8, OTHER = "その他";  // 出退勤端末の管理者パスワードと同じ番号(2026-10-13)
+  var token = "", data = null, tab = "todo", pin = "", draft = {};
+  try { token = sessionStorage.getItem("navi-mobile-token") || ""; } catch (e) {}
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  var toastTimer;
+  function toast(msg) { var t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 5000); }
+  // Google の中身との受け渡し。Google の住所(Apps Script の …/exec)は QR コードの #s=… にだけ入れ、このページには書かない
+  // (2026-10-13: スマホの Chrome に Google アカウントが2つ以上あると Google の画面が開けないため、画面を Google の外に置いた)
+  var ENDPOINT = "";
+  (function () {
+    var m = location.hash.match(/[#&]s=([A-Za-z0-9_-]{20,})/);
+    try {
+      if (m) localStorage.setItem("navi-mobile-s", m[1]);
+      var s = m ? m[1] : localStorage.getItem("navi-mobile-s");
+      if (s) ENDPOINT = "https://script.google.com/macros/s/" + s + "/exec";
+    } catch (e) { if (m) ENDPOINT = "https://script.google.com/macros/s/" + m[1] + "/exec"; }
+  })();
+  var API = {
+    login: function (pin) { return ["login", { pin: pin }]; },
+    listQuestions: function (token) { return ["list", { token: token }]; },
+    answer: function (token, id, ans, other) { return ["answer", { token: token, id: id, answer: ans, other: other }]; },
+    clearAnswer: function (token, id) { return ["clear", { token: token, id: id }]; },
+    setLater: function (token, id, on) { return ["later", { token: token, id: id, on: on }]; }
+  };
+  function call(fn) {
+    var args = Array.prototype.slice.call(arguments, 1), req = API[fn].apply(null, args);
+    $("busy").hidden = false;
+    function fail(msg) {
+      $("busy").hidden = true;
+      if (/暗証番号を入れて/.test(msg)) { logout(); }
+      toast(msg);
+      return Promise.reject(new Error(msg));
+    }
+    if (!ENDPOINT) return fail("QR コードから開いてください");
+    // credentials: "omit" = スマホの Google のログインを使わない(アカウントが何個あっても同じように動く)
+    return fetch(ENDPOINT + "?c=" + req[0], { method: "POST", body: JSON.stringify(req[1]), credentials: "omit", redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" } })
+      .then(function (res) { return res.json(); }, function () { throw { net: true }; })
+      .then(function (r) {
+        if (r && r.error) return fail(r.error);
+        $("busy").hidden = true;
+        return r;
+      }, function () { return fail("通信できませんでした。電波のよい所でもう一度お試しください"); });
+  }
+  function setToken(t) { token = t; try { if (t) sessionStorage.setItem("navi-mobile-token", t); else sessionStorage.removeItem("navi-mobile-token"); } catch (e) {} }
+
+  // --- 暗証番号 ---
+  function dots() { $("dots").innerHTML = Array.from({ length: PIN_LEN }, function (_, i) { return '<span class="pin-dot' + (i < pin.length ? " on" : "") + '"></span>'; }).join(""); }
+  function logout() { setToken(""); data = null; $("main").hidden = true; $("hdr").hidden = true; $("login").hidden = false; pin = ""; dots(); }
+  $("pad").addEventListener("click", function (e) {
+    var b = e.target.closest("button[data-k]");
+    if (!b || !b.dataset.k || pin.length >= PIN_LEN) return;
+    pin += b.dataset.k; dots();
+    if (pin.length === PIN_LEN) {
+      var p = pin;
+      call("login", p).then(function (r) {
+        pin = ""; dots();
+        if (r.ok) { setToken(r.token); $("loginErr").textContent = ""; load(); return; }
+        if (r.locked) { var m = Math.ceil((r.locked - Date.now()) / 60000); $("loginErr").textContent = r.msg + "(約" + m + "分)"; return; }
+        $("loginErr").textContent = r.msg;
+      }, function () { pin = ""; dots(); });
+    }
+  });
+  $("del").addEventListener("click", function () { pin = pin.slice(0, -1); dots(); });
+
+  // --- 一覧 ---
+  function load() {
+    return call("listQuestions", token).then(function (d) {
+      data = d;
+      $("login").hidden = true; $("main").hidden = false; $("hdr").hidden = false;
+      render();
+    }, function () {});
+  }
+  document.querySelectorAll(".tabs button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      tab = b.dataset.tab;
+      document.querySelectorAll(".tabs button").forEach(function (x) { x.classList.toggle("on", x === b); });
+      render(); window.scrollTo(0, 0);
+    });
+  });
+  function groups() {
+    var g = { todo: [], later: [], done: [] };
+    data.questions.forEach(function (q) { g[q.mAnswer ? "done" : q.mLater ? "later" : "todo"].push(q); });
+    return g;
+  }
+  function render() {
+    var g = groups(), news = data.questions.filter(function (q) { return q.isNew && !q.mAnswer; }).length;
+    $("meta").textContent = "未回答 " + g.todo.length + "件・会社で確認 " + g.later.length + "件・答えた " + g.done.length + "件" + (news ? "(新着 " + news + "件)" : "");
+    var labels = { todo: "未回答", later: "会社で確認", done: "答えた" };
+    document.querySelectorAll(".tabs button").forEach(function (b) { b.textContent = labels[b.dataset.tab] + " " + g[b.dataset.tab].length; });
+    $("help").textContent = tab === "todo" ? "上から「答えてほしい順」です。家で答えられるものだけで大丈夫です。会社の Excel を見ないとわからないものは「会社で確認する」を押してください。" :
+      tab === "later" ? "会社で確認する印を付けた質問です。会社の業務ナビでも答えられます。" :
+      "答えた質問です。会社のPCに届くまで(数分)は答え直せます。届いたものはこの一覧から消えます。";
+    var list = g[tab];
+    $("list").innerHTML = list.length ? list.map(cardHtml).join("") : '<div class="empty">' + (tab === "todo" ? "未回答の質問はありません" : "ありません") + "</div>";
+    bind();
+  }
+  function lookHtml(l) {
+    var h = '<div class="look"><div class="look-label">📄 ' + esc(l.label) + "</div>";
+    if (l.table) {
+      h += '<div class="xl"><table><tr><th></th>' + l.table.cols.map(function (c) { return "<th>" + esc(c) + "</th>"; }).join("") + "</tr>" +
+        l.table.rows.map(function (r) {
+          return "<tr><th>" + esc(r.n) + "</th>" + r.cells.map(function (c, i) { return '<td' + (r.hit && r.hit[i] ? ' class="hit"' : "") + ">" + esc(c) + "</td>"; }).join("") + "</tr>";
+        }).join("") + "</table></div>";
+      if (l.table.at) h += '<div class="look-note">' + esc(l.table.at) + " 時点の中身(黄色が質問の場所)</div>";
+      if (l.table.warn) h += '<div class="look-note look-warn">⚠ ' + esc(l.table.warn) + "</div>";
+    } else if (l.note) {
+      h += '<div class="look-note">' + esc(l.note) + "</div>";
+    }
+    return h + "</div>";
+  }
+  function cardHtml(q) {
+    var d = draft[q.id] || { answer: q.mAnswer, other: q.mOther };
+    var b = [];
+    if (q.priority === 1) b.push('<span class="badge urgent">急ぎ</span>');
+    if (q.isNew && !q.mAnswer) b.push('<span class="badge new">新着</span>');
+    if (q.mAnswer) b.push('<span class="badge done">答えた ' + esc(String(q.mAnsweredAt).slice(5, 16)) + "</span>");
+    if (q.mLater) b.push('<span class="badge later">会社で確認</span>');
+    if (q.taskTitle) b.push('<span class="badge">' + esc(q.taskTitle) + "</span>");
+    var choices = (q.choices || []).slice();
+    if (q.allow_other !== false || !choices.length) choices.push(OTHER);
+    var h = '<article class="card' + (q.mAnswer ? " answered" : "") + '" data-id="' + esc(q.id) + '">' +
+      '<div class="badges">' + b.join("") + "</div><h2>" + esc(q.title) + "</h2>" +
+      (q.blocks ? '<div class="blocks">⏳ これが決まらないと: ' + esc(q.blocks) + "</div>" : "") +
+      '<div class="q">' + esc(q.question) + "</div>" +
+      (q.context ? '<details class="ctx"><summary>参考</summary><div class="ctx-body">' + esc(q.context) + "</div></details>" : "") +
+      (q.look || []).map(lookHtml).join("");
+    h += '<div class="choices">' + choices.map(function (c) {
+      return '<button type="button" class="choice' + (d.answer === c ? " sel" : "") + '" data-choice="' + esc(c) + '">' + esc(c) + "</button>";
+    }).join("") + "</div>";
+    h += '<textarea data-other placeholder="「その他」の内容"' + (d.answer === OTHER ? "" : " hidden") + ">" + esc(d.other || "") + "</textarea>";
+    var changed = d.answer !== q.mAnswer || (d.answer === OTHER && (d.other || "") !== (q.mOther || ""));
+    h += '<div class="row"><button type="button" class="btn" data-act="send"' + (d.answer && changed ? "" : " disabled") + ">" + (q.mAnswer ? "答え直す" : "この答えで送る") + "</button>";
+    if (q.mAnswer) h += '<button type="button" class="btn sub" data-act="clear">答えを取り消す</button>';
+    else h += '<button type="button" class="btn sub" data-act="later">' + (q.mLater ? "会社で確認をやめる" : "会社で確認する") + "</button>";
+    h += "</div>";
+    if (q.mAnswer) h += '<div class="done-box">答え: ' + esc(q.mAnswer) + (q.mOther ? "(" + esc(q.mOther) + ")" : "") + "<br>会社のPCに届くと、この一覧から消えます</div>";
+    return h + "</article>";
+  }
+  function qOf(id) { return data.questions.filter(function (q) { return q.id === id; })[0]; }
+  function bind() {
+    document.querySelectorAll("article.card").forEach(function (card) {
+      var id = card.dataset.id, q = qOf(id);
+      function d() { return draft[id] || (draft[id] = { answer: q.mAnswer, other: q.mOther }); }
+      card.querySelectorAll("[data-choice]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          d().answer = btn.dataset.choice;
+          card.querySelectorAll("[data-choice]").forEach(function (x) { x.classList.toggle("sel", x === btn); });
+          var ta = card.querySelector("[data-other]");
+          ta.hidden = d().answer !== OTHER;
+          if (!ta.hidden) ta.focus();
+          refreshSend(card, q);
+        });
+      });
+      card.querySelector("[data-other]").addEventListener("input", function (e) { d().other = e.target.value; refreshSend(card, q); });
+      card.querySelectorAll("[data-act]").forEach(function (btn) {
+        btn.addEventListener("click", function () { act(btn.dataset.act, q, d()); });
+      });
+    });
+  }
+  function refreshSend(card, q) {
+    var d = draft[q.id], send = card.querySelector('[data-act="send"]');
+    var changed = d.answer !== q.mAnswer || (d.answer === OTHER && (d.other || "") !== (q.mOther || ""));
+    send.disabled = !d.answer || !changed || (d.answer === OTHER && !(d.other || "").trim());
+  }
+  function act(kind, q, d) {
+    var p = kind === "send" ? call("answer", token, q.id, d.answer, d.answer === OTHER ? d.other : "") :
+      kind === "clear" ? call("clearAnswer", token, q.id) :
+      call("setLater", token, q.id, !q.mLater);
+    p.then(function () {
+      delete draft[q.id];
+      toast(kind === "send" ? "送りました。会社のPCに数分で届きます" : kind === "clear" ? "答えを取り消しました" : q.mLater ? "未回答に戻しました" : "「会社で確認」に移しました");
+      return load();
+    }, function () {});
+  }
+
+  dots();
+  if (token) load(); else logout();
+})();
+</script>
+</body>
+</html>
