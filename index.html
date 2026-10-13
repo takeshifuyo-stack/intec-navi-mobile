@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- 業務ナビ スマホ版の画面(GitHub Pages に置く)。中身は Google(apps-script/navi-mobile/Code.gs の doPost ?c=…)。
+<!-- 業務ナビ スマホ版の画面(GitHub Pages に置く)。中身は Google(apps-script/navi-mobile/Code.gs の doPost ?cmd=…)。
      apps-script/navi-mobile/Index.html を元に、通信の部分だけを fetch に差し替えたもの。画面を直すときは両方を合わせる -->
 <html lang="ja">
 <head>
@@ -145,7 +145,7 @@
     }
     if (!ENDPOINT) return fail("QR コードから開いてください");
     // credentials: "omit" = スマホの Google のログインを使わない(アカウントが何個あっても同じように動く)
-    return fetch(ENDPOINT + "?c=" + req[0], { method: "POST", body: JSON.stringify(req[1]), credentials: "omit", redirect: "follow",
+    return fetch(ENDPOINT + "?cmd=" + req[0], { method: "POST", body: JSON.stringify(req[1]), credentials: "omit", redirect: "follow",
       headers: { "Content-Type": "text/plain;charset=utf-8" } })
       .then(function (res) { return res.json(); }, function () { throw { net: true }; })
       .then(function (r) {
