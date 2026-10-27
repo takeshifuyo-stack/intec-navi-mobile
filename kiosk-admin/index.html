@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https://script.google.com https://script.googleusercontent.com; img-src data: blob:; base-uri 'none'; form-action 'none'">
+<title>管理者専用</title>
+<!-- このファイルは scripts/calc/build_admin_pages.py が apps-script/kintai-kiosk/Admin.html から作ったもの(直接直さない)。
+     中身は Google(Code.gs の doPost ?cmd=…)。Google の住所は QR コードの #s=… にだけ入れ、このページには書かない -->
+<!-- 管理者専用ページ(?page=admin。2026-10-27 Takeshi 決定。docs/kiosk-admin-page.md)。
+     スマホ・PC 向けの縦長の画面。開いたら必ず管理者パスワード。10分触らなければ自動で閉じる。
+     中の操作はサーバーの今までの関数(adminIssueTempPin・adminAdvances・adminPunchFix・adminRosterSave・adminMonthly・adminToday など)を使い、
+     サーバー側の権限の確かめ(requireAdmin_)はそのまま。置き場所(北山/厚原)は iPad ごとの設定なので、このページにはない(iPad の「⚙ 名簿の管理」) -->
+<style>
+  :root {
+    --bg: #f6f5f2; --card: #ffffff; --ink: #1f2328; --muted: #5f6670; --line: #dcdad4;
+    --accent: #1f4f8f; --accent-ink: #ffffff; --warn: #a1490f; --danger: #b42318; --ok: #1f6f5c; --soft: #eef2f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181b; --card: #1f2226; --ink: #ebeae6; --muted: #a3a9b0; --line: #34383d;
+      --accent: #7aa7e0; --accent-ink: #0f1218; --warn: #f0a46a; --danger: #ff8a7a; --ok: #5cb89c; --soft: #222a35; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px 12px 64px; }
+  h1 { font-size: 21px; margin: 8px 0 4px; }
+  h2 { font-size: 18px; margin: 0 0 10px; }
+  h3 { font-size: 16px; margin: 14px 0 6px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  label.inline { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; margin: 8px 0; }
+  label.inline input { width: auto; }
+  select, input { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
+  input.pin { letter-spacing: .4em; font-size: 22px; text-align: center; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 9px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; width: 100%; margin-top: 14px; padding: 13px; }
+  button.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button.danger-solid { background: var(--danger); color: #fff; border-color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { margin: 10px 0 0; font-size: 15px; white-space: pre-wrap; }
+  .msg.err { color: var(--danger); }
+  .msg.ok { color: var(--ok); }
+  .tabs { display: flex; gap: 6px; overflow-x: auto; margin: 8px 0 12px; position: sticky; top: 0; background: var(--bg); padding: 6px 0; z-index: 5; }
+  .tabs button { white-space: nowrap; padding: 8px 11px; font-size: 14px; }
+  .tabs button[aria-selected="true"], .subtabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .subtabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .subtabs button { padding: 6px 10px; font-size: 14px; }
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 700; }
+  tr.cancelled td { color: var(--muted); text-decoration: line-through; }
+  .item { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: 0; }
+  .item .top { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .acts { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .badge { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); margin-left: 4px; }
+  .badge.good, .badge.承認 { color: var(--ok); border-color: var(--ok); }
+  .badge.warn, .badge.申請中 { color: var(--warn); border-color: var(--warn); }
+  .badge.bad, .badge.却下, .badge.取消 { color: var(--danger); border-color: var(--danger); }
+  .issued { border: 3px solid var(--warn); }
+  .bigpin { font-size: 48px; letter-spacing: .3em; text-align: center; font-weight: 800; margin: 6px 0; font-variant-numeric: tabular-nums; }
+  .note { background: var(--soft); border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  .note ul { margin: 4px 0 0; padding-left: 20px; }
+  .warnbox { border: 2px solid var(--warn); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-size: 14px; }
+  .warnbox.ng { border-color: var(--danger); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .busy { position: fixed; inset: auto 0 0 0; background: var(--ink); color: var(--bg); text-align: center; padding: 8px; font-size: 14px; z-index: 20; }
+  .idle-warn { position: fixed; left: 50%; bottom: 48px; transform: translateX(-50%); z-index: 30; width: min(560px, calc(100% - 24px)); background: var(--warn); color: #fff; font-weight: 700; text-align: center; border-radius: 12px; padding: 12px 14px; }
+  .testmark { background: #c62828; color: #fff; font-weight: 700; text-align: center; border-radius: 8px; padding: 4px; margin-bottom: 6px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  textarea { width: 100%; min-height: 120px; font: 13px monospace; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div id="testMark" class="testmark"></div>
+  <div class="topbar">
+    <h1><span id="testMarkH"></span>管理者専用ページ</h1>
+    <button id="logoutBtn" type="button" hidden>ログアウト</button>
+  </div>
+  <p class="sub">出退勤・給食端末と前渡し申請の管理。従業員の目に触れない所で使ってください。</p>
+
+  <!-- 入る(開いたら必ず管理者パスワード) -->
+  <section id="vLogin" class="card">
+    <label for="adminPw">管理者パスワード(8桁)</label>
+    <input id="adminPw" class="pin" type="password" inputmode="numeric" maxlength="8" autocomplete="off">
+    <button id="loginBtn" class="primary" type="button">入る</button>
+    <p id="loginMsg" class="msg"></p>
+    <p class="sub" style="margin-top:12px">10分触らないと自動で閉じます。iPad の置き場所(北山/厚原)は、その iPad の「⚙ 名簿の管理」で選びます。</p>
+  </section>
+
+  <section id="vMain" hidden>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="pins">暗証番号</button>
+      <button type="button" role="tab" data-tab="adv">前渡し</button>
+      <button type="button" role="tab" data-tab="fix">打刻の修正</button>
+      <button type="button" role="tab" data-tab="roster">名簿</button>
+      <button type="button" role="tab" data-tab="monthly">月次集計</button>
+      <button type="button" role="tab" data-tab="today">本日の記録</button>
+    </div>
+    <p id="mainMsg" class="msg"></p>
+
+    <!-- 暗証番号の状態の一覧 -->
+    <div data-pane="pins" hidden>
+      <div id="pinIssued" class="card issued" hidden></div>
+      <div class="card">
+        <h2>暗証番号の状態</h2>
+        <p class="sub">番号そのものはどこにも出ません(サーバーには暗号にした値だけ)。</p>
+        <div class="grid2">
+          <div><label for="pinFilter">絞り込み</label>
+            <select id="pinFilter"><option value="">すべて</option><option value="未設定">未設定</option><option value="仮">仮の番号(発行中・期限切れ)</option><option value="停止">止まっている</option><option value="設定済み">設定済み</option></select></div>
+          <div><label for="pinSearch">名前で探す</label><input id="pinSearch" type="search" autocomplete="off"></div>
+        </div>
+        <p id="pinSummary" class="sub" style="margin-top:8px"></p>
+        <p id="pinMsg" class="msg"></p>
+        <div id="pinList"></div>
+      </div>
+    </div>
+
+    <!-- 前渡し -->
+    <div data-pane="adv" hidden>
+      <div class="card">
+        <div class="subtabs">
+          <button type="button" data-adv="pending">申請中</button>
+          <button type="button" data-adv="day">日ごと(振込一覧)</button>
+          <button type="button" data-adv="month">月の一覧</button>
+          <button type="button" data-adv="proxy">代理入力</button>
+        </div>
+        <p id="advMsg" class="msg"></p>
+        <div data-advpane="pending"><h2>申請中</h2><div id="pendingList"></div></div>
+        <div data-advpane="day" hidden>
+          <h2>日ごと</h2>
+          <label for="dayPick">支払日</label><input id="dayPick" type="date">
+          <p class="sub" id="dayPays"></p>
+          <div id="dayOut"></div>
+        </div>
+        <div data-advpane="month" hidden>
+          <h2>月の一覧(承認済みを給与で差し引く)</h2>
+          <label for="advMonth">支払日の月</label><input id="advMonth" type="month">
+          <div id="monthOut" style="margin-top:10px"></div>
+        </div>
+        <div data-advpane="proxy" hidden>
+          <h2>代理入力(電話などで受けた分)</h2>
+          <p class="sub">承認済みとして記録します。15,000円を超える額は「上限超え」の印が付きます。</p>
+          <label for="pxName">お名前</label><select id="pxName"></select>
+          <label for="pxDate">支払日</label><input id="pxDate" type="date">
+          <label for="pxAmount">金額(円)</label><input id="pxAmount" type="number" inputmode="numeric" min="1" step="1">
+          <label for="pxMethod">受け取り方</label><select id="pxMethod"></select>
+          <label for="pxMemo">メモ(任意)</label><input id="pxMemo" type="text" maxlength="60">
+          <button id="pxBtn" class="primary" type="button">記録する</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 打刻の修正 -->
+    <div data-pane="fix" hidden>
+      <div class="card">
+        <h2>打刻の修正</h2>
+        <p class="sub">元の打刻は消しません。直した人・理由はシート「打刻の修正」に残ります。集計は直したあとの値です。</p>
+        <div class="grid2">
+          <div><label for="fixMonth">勤務の月</label><input id="fixMonth" type="month"></div>
+          <div><label for="fixName">名前</label><select id="fixName"><option value="">全員</option></select></div>
+        </div>
+        <label class="inline"><input id="fixOnlyOpen" type="checkbox" checked>退勤なし・勤務中だけ</label>
+        <button id="addOpen" type="button">＋ 出勤を足す(出勤の押し忘れ)</button>
+        <p id="fixMsg" class="msg"></p>
+        <div id="fixTable" class="scroll"></div>
+      </div>
+      <div id="fixEdit" class="card" hidden>
+        <h2>直す</h2>
+        <p id="fixTarget" class="sub"></p>
+        <label for="fixShift">勤務</label><select id="fixShift"></select>
+        <label for="fixDay">勤務の日</label><input id="fixDay" type="date">
+        <label for="fixIn">出勤</label><input id="fixIn" type="datetime-local">
+        <label for="fixOut">退勤</label><input id="fixOut" type="datetime-local">
+        <label class="inline"><input id="fixEarly" type="checkbox">早出</label>
+        <label for="fixBy">直した人(必須)</label><input id="fixBy" type="text" maxlength="30">
+        <label for="fixWhy">理由(必須)</label><input id="fixWhy" type="text" maxlength="200">
+        <div id="fixHist" class="sub" style="margin-top:8px"></div>
+        <div class="acts">
+          <button id="fixSave" class="go" type="button">この内容で直す</button>
+          <button id="fixCancelAsk" class="danger" type="button">この打刻を取り消す</button>
+          <button id="fixClose" type="button">閉じる</button>
+        </div>
+        <div id="fixCancelBox" class="warnbox ng" hidden>
+          <span id="fixCancelText"></span>
+          <div class="acts"><button id="fixCancelYes" class="danger-solid" type="button">取り消す</button><button id="fixCancelNo" type="button">やめる</button></div>
+        </div>
+        <p id="fixEditMsg" class="msg"></p>
+      </div>
+      <div id="addEdit" class="card" hidden>
+        <h2>出勤を足す</h2>
+        <p class="sub">打刻のない日に出勤の行を足します。給食は足しません(要ったかは別に判断)。同じ人・同じ勤務の日の打刻がもうあれば断ります(「直す」で直してください)。</p>
+        <label for="addName">名前</label><select id="addName"></select>
+        <label for="addDay">勤務の日</label><input id="addDay" type="date">
+        <label for="addPlace">置き場所</label><select id="addPlace"></select>
+        <label for="addShift">勤務</label><select id="addShift"></select>
+        <label for="addIn">出勤(勤務の定時が入ります。遅れて来た人は本当の時刻に)</label><input id="addIn" type="datetime-local">
+        <label for="addOut">退勤(空 = まだ。もう帰った人だけ)</label><input id="addOut" type="datetime-local">
+        <label class="inline"><input id="addEarly" type="checkbox">早出</label>
+        <label for="addBy">直した人(必須)</label><input id="addBy" type="text" maxlength="30">
+        <label for="addWhy">理由(必須)</label><input id="addWhy" type="text" maxlength="200">
+        <div class="acts"><button id="addSave" class="go" type="button">出勤を足す</button><button id="addClose" type="button">閉じる</button></div>
+        <p id="addMsg" class="msg"></p>
+      </div>
+    </div>
+
+    <!-- 名簿 -->
+    <div data-pane="roster" hidden>
+      <div class="card">
+        <h2>名簿</h2>
+        <p id="codeInfo" class="sub"></p>
+        <h3>追加</h3>
+        <div class="grid2">
+          <div><label for="rosterNew">名前</label><input id="rosterNew" type="text" maxlength="30"></div>
+          <div><label for="rosterNewCode">従業員コード(空ならエプソンの在職者と照合)</label><input id="rosterNewCode" type="text" inputmode="numeric" maxlength="10"></div>
+        </div>
+        <button id="rosterAddBtn" class="go" type="button" style="margin-top:8px">追加</button>
+        <h3>新しい人を登録(従業員コードを発行)</h3>
+        <label for="issueName">名前</label><input id="issueName" type="text" maxlength="30">
+        <button id="issueBtn" class="go" type="button" style="margin-top:8px">番号を発行して登録</button>
+        <div id="epsonMatch" class="warnbox" hidden></div>
+        <p id="rosterMsg" class="msg"></p>
+        <h3>登録されている人</h3>
+        <div id="rosterList"></div>
+      </div>
+    </div>
+
+    <!-- 月次集計 -->
+    <div data-pane="monthly" hidden>
+      <div class="card">
+        <h2>月次集計(給与用)</h2>
+        <label for="mPick">対象月</label><input id="mPick" type="month">
+        <p id="monthlyToday" class="warnbox" hidden></p>
+        <div id="monthlyWarn" class="warnbox" hidden></div>
+        <div id="monthlyTable" class="scroll"></div>
+        <button id="monthlyCsv" class="primary" type="button" disabled>CSV を保存</button>
+        <p id="monthlyMsg" class="msg"></p>
+        <textarea id="csvFallback" hidden></textarea>
+      </div>
+    </div>
+
+    <!-- 本日の記録 -->
+    <div data-pane="today" hidden>
+      <div class="card">
+        <div class="topbar"><h2>本日の記録</h2><button id="todayReload" type="button">読み直す</button></div>
+        <h3>打刻</h3><div id="logTable" class="scroll"></div>
+        <h3>給食</h3><div id="mealTable" class="scroll"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<div id="busy" class="busy" hidden>通信中…</div>
+<div id="idleWarn" class="idle-warn" role="alert" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  // 10分触らないと閉じる(30秒前に知らせる)。管理者の合言葉は10分で切れるので、使っている間は5分ごとに新しくする(adminRenew)
+  var IDLE_MS = 600000, WARN_SEC = 30, RENEW_MS = 300000;
+  var PLACE_REC = "管理者専用ページ";   // 打刻の修正の記録の「設置場所」
+  var token = "", tokenAt = 0, S = null, gen = 0, renewing = null;
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
+  function pad(n) { return String(n).padStart(2, "0"); }
+  function yen(n) { return Number(n).toLocaleString() + "円"; }
+  function hm(s) { if (!s) return "—"; var m = String(s).match(/(\d{2}):(\d{2})/); return m ? m[1] + ":" + m[2] : s; }
+  function dur(m) { return Math.floor(m / 60) + "時間" + pad(m % 60) + "分"; }
+  function jpDate(s) {
+    var m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return s;
+    var d = new Date(+m[1], +m[2] - 1, +m[3]);
+    return (+m[2]) + "月" + (+m[3]) + "日(" + "日月火水木金土"[d.getDay()] + ")";
+  }
+  function msg(id, text, kind) { var m = $(id); m.textContent = text || ""; m.className = "msg" + (kind ? " " + kind : ""); }
+  function errText(e) { return String((e && e.message) || "通信できませんでした").replace(/^(Exception|Error):\s*/, ""); }
+  function newReqId() { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10); }
+  if (!$("testMark").textContent.trim()) $("testMark").hidden = true;
+
+  // ---------- サーバー ----------
+  // 2つの置き場所で同じ画面を使う(2026-10-27):
+  //  - Google の画面(…/exec?page=admin): google.script.run
+  //  - GitHub Pages(web/kiosk-admin/index.html。scripts/calc/build_admin_pages.py でこのファイルから作る): fetch で Code.gs の doPost ?cmd=<関数名>。
+  //    スマホのブラウザに Google アカウントが2つ以上あると Google の画面が開けないため。Google の住所(デプロイ ID)は QR の #s=… にだけ入れ、
+  //    このページには書かない。credentials: "omit" = Google のログインを使わない(アカウントが何個あっても同じように動く)
+  var GAS = !!(typeof google === "object" && google && google.script && google.script.run);
+  var ENDPOINT = "";
+  if (!GAS) {
+    // ほかのページの枠(iframe)の中では動かない(クリックジャッキング対策。Google の画面は Google が守る)
+    if (window.top !== window.self) { document.body.innerHTML = ""; return; }
+    var sm = String(location.hash || "").match(/[#&]s=([A-Za-z0-9_-]{20,})/);
+    try {
+      if (sm) localStorage.setItem("kiosk-admin-s", sm[1]);
+      var sv = sm ? sm[1] : localStorage.getItem("kiosk-admin-s");
+      if (sv) ENDPOINT = "https://script.google.com/macros/s/" + sv + "/exec";
+    } catch (e) { if (sm) ENDPOINT = "https://script.google.com/macros/s/" + sm[1] + "/exec"; }
+  }
+  function send(fn, args, okf, ngf) {
+    if (GAS) { google.script.run.withSuccessHandler(okf).withFailureHandler(ngf)[fn].apply(null, args); return; }
+    if (!ENDPOINT) { ngf(new Error("QR コードから開いてください")); return; }
+    fetch(ENDPOINT + "?cmd=" + encodeURIComponent(fn), { method: "POST", body: JSON.stringify({ args: args, token: token }), credentials: "omit", redirect: "follow",
+      cache: "no-store", referrerPolicy: "no-referrer", headers: { "Content-Type": "text/plain;charset=utf-8" } })
+      .then(function (res) { return res.json(); })
+      .then(function (r) {
+        if (!r || typeof r !== "object") throw new Error("bad");
+        if (r.error) ngf(new Error(r.error)); else okf(r.result);
+      }).catch(function () { ngf(new Error("通信できませんでした。電波のよい所でもう一度お試しください")); });
+  }
+  // gen: ログアウト・自動で閉じるたびに増やす。その前に送った通信の返事は捨てる(閉じたあとに一覧が出ないように)
+  var busyN = 0;
+  function call(fn) {
+    var args = Array.prototype.slice.call(arguments, 1), my = gen;
+    busyN++; $("busy").hidden = false;
+    return new Promise(function (resolve, reject) {
+      function done() { busyN = Math.max(0, busyN - 1); if (!busyN) $("busy").hidden = true; }
+      send(fn, args, function (r) { done(); if (my !== gen) return; resolve(r); },
+        function (e) { done(); if (my !== gen) return; reject(new Error(errText(e))); });
+    });
+  }
+  // Pages の版: テスト版かどうかをサーバーに聞いて、上に印を出す(Google の画面ではサーバーがひな形に入れる)
+  if (!GAS) {
+    if (!ENDPOINT) msg("loginMsg", "QR コードから開いてください(管理者専用ページの QR を読み取ると開きます)", "err");
+    else send("adminHello", [], function (r) {
+      if (r && r.mark) { $("testMark").textContent = r.mark; $("testMark").hidden = false; $("testMarkH").textContent = r.mark; document.title = r.mark + "管理者専用"; }
+    }, function () {});
+  }
+  function renew() {
+    if (!token || Date.now() - tokenAt < RENEW_MS) return Promise.resolve();
+    if (!renewing) {
+      renewing = call("adminRenew", token).then(function (r) { token = r.token; tokenAt = Date.now(); renewing = null; },
+        function (e) { renewing = null; throw e; });
+    }
+    return renewing;
+  }
+  // 管理者の関数を呼ぶ(合言葉を最初の引数に付ける)。確認が切れていたらログインの画面に戻す
+  function acall(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return renew().then(function () { return call.apply(null, [fn, token].concat(args)); }).catch(function (e) {
+      if (/管理者の確認が切れました/.test(e.message)) logout("管理者の確認が切れました。もう一度パスワードを入力してください");
+      throw e;
+    });
+  }
+
+  // ---------- 入る・閉じる ----------
+  var idleAt = 0;
+  function poke() { idleAt = Date.now() + IDLE_MS; if (!$("idleWarn").hidden) $("idleWarn").hidden = true; }
+  ["touchstart", "mousedown", "keydown", "input", "change", "scroll", "wheel"].forEach(function (ev) { document.addEventListener(ev, poke, { capture: true, passive: true }); });
+  function checkIdle() {
+    if (!token) return;
+    if (busyN > 0) { poke(); return; }
+    var left = Math.ceil((idleAt - Date.now()) / 1000);
+    if (left <= 0) { logout("しばらく操作がなかったため、閉じました"); return; }
+    if (left <= WARN_SEC) { $("idleWarn").textContent = "操作がないため、あと " + left + " 秒で閉じます(画面に触れると続けられます)"; $("idleWarn").hidden = false; }
+  }
+  setInterval(checkIdle, 1000);
+
+  var CLEAR_HTML = ["pinIssued", "pinList", "pinSummary", "pendingList", "dayOut", "dayPays", "monthOut", "fixTable", "fixHist", "codeInfo", "epsonMatch", "rosterList",
+    "monthlyWarn", "monthlyTable", "logTable", "mealTable"];
+  var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "issueName", "csvFallback"];
+  function logout(note) {
+    if (token) { try { send("adminLogout", [token], function () {}, function () {}); } catch (e) {} }
+    gen++; token = ""; tokenAt = 0; renewing = null; S = null; busyN = 0;
+    lastMonthly = null; adminList = []; fixUi = { list: [], shifts: [], sel: null, by: "", names: [], places: [], shiftDefs: [] }; pinRows = [];
+    CLEAR_HTML.forEach(function (id) { $(id).innerHTML = ""; });
+    CLEAR_VAL.forEach(function (id) { $(id).value = ""; });
+    ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
+    ["mainMsg", "pinMsg", "advMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg"].forEach(function (id) { msg(id, ""); });
+    $("busy").hidden = true; $("vMain").hidden = true; $("logoutBtn").hidden = true; $("vLogin").hidden = false;
+    msg("loginMsg", note || "", note ? "err" : "");
+    window.scrollTo(0, 0);
+  }
+  $("logoutBtn").addEventListener("click", function () { logout("ログアウトしました"); });
+  $("loginBtn").addEventListener("click", function () {
+    var pw = $("adminPw").value;
+    if (!/^\d{8}$/.test(pw)) { msg("loginMsg", "8桁の数字を入れてください", "err"); return; }
+    call("adminLogin", pw).then(function (r) {
+      $("adminPw").value = "";
+      if (r.locked) { msg("loginMsg", "入力回数が多いため、1分ほど待ってください", "err"); return; }
+      if (!r.ok) { msg("loginMsg", "パスワードが違います(あと" + r.left + "回)", "err"); return; }
+      token = r.token; tokenAt = Date.now(); poke();
+      return call("applyState").then(function (s) {
+        S = s;
+        msg("loginMsg", ""); $("vLogin").hidden = true; $("vMain").hidden = false; $("logoutBtn").hidden = false;
+        tab("pins");
+      });
+    }).catch(function (e) { msg("loginMsg", errText(e), "err"); });
+  });
+  $("adminPw").addEventListener("keydown", function (e) { if (e.key === "Enter") $("loginBtn").click(); });
+
+  // ---------- タブ ----------
+  var curTab = "";
+  document.querySelectorAll("[data-tab]").forEach(function (b) { b.addEventListener("click", function () { tab(b.getAttribute("data-tab")); }); });
+  function tab(name) {
+    curTab = name;
+    msg("mainMsg", "");
+    // 仮の番号は画面に1回だけ: ほかのタブへ移ったら消す
+    if (name !== "pins") { $("pinIssued").innerHTML = ""; $("pinIssued").hidden = true; }
+    document.querySelectorAll("[data-tab]").forEach(function (b) { b.setAttribute("aria-selected", String(b.getAttribute("data-tab") === name)); });
+    document.querySelectorAll("[data-pane]").forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== name; });
+    if (name === "pins") loadPins();
+    if (name === "adv") openAdv();
+    if (name === "fix") openFix();
+    if (name === "roster") openRoster();
+    if (name === "monthly") openMonthly();
+    if (name === "today") loadToday();
+  }
+  // 一覧の中のボタンは、入れ物でまとめて受ける(data-act)
+  function onAct(id, handlers) {
+    $(id).addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest("[data-act]") : null;
+      if (!b) return;
+      var f = handlers[b.getAttribute("data-act")];
+      if (f) f(b);
+    });
+  }
+  function da(b, k) { return b.getAttribute("data-" + k) || ""; }
+
+  // ---------- 暗証番号の状態 ----------
+  var pinRows = [];
+  var STATE_BADGE = { "設定済み": "good", "未設定": "", "仮の番号": "warn", "仮の番号の期限切れ": "bad", "停止": "bad" };
+  function loadPins() {
+    return acall("adminPinStatus").then(function (d) { pinRows = d.rows; renderPins(); }, function (e) { msg("pinMsg", errText(e), "err"); });
+  }
+  ["pinFilter", "pinSearch"].forEach(function (id) { $(id).addEventListener("input", renderPins); $(id).addEventListener("change", renderPins); });
+  function renderPins() {
+    var f = $("pinFilter").value, q = $("pinSearch").value.replace(/[\s　]+/g, "");
+    var cnt = {};
+    pinRows.forEach(function (p) { cnt[p.state] = (cnt[p.state] || 0) + 1; });
+    $("pinSummary").textContent = pinRows.length + "人: " + ["設定済み", "未設定", "仮の番号", "仮の番号の期限切れ", "停止"].filter(function (k) { return cnt[k]; })
+      .map(function (k) { return k + " " + cnt[k]; }).join("・");
+    var rows = pinRows.filter(function (p) {
+      if (f === "仮" ? p.state.indexOf("仮の番号") !== 0 : f && p.state !== f) return false;
+      return !q || p.name.replace(/[\s　]+/g, "").indexOf(q) >= 0;
+    });
+    $("pinList").innerHTML = !rows.length ? '<p class="sub">当てはまる人はいません</p>' : rows.map(function (p) {
+      var detail = p.state === "設定済み" ? "最後に変えた日 " + p.setAt.slice(0, 10)
+        : p.state === "仮の番号" ? "発行 " + p.setAt.slice(0, 16) + "・今日(" + jpDate(p.tempUntil) + ")のうちだけ有効"
+        : p.state === "仮の番号の期限切れ" ? "発行 " + p.setAt.slice(0, 16) + "・期限切れ(もう使えません。要るならもう一度発行)"
+        : p.state === "停止" ? p.blockedSince + " から止まっています(1日10回まちがえた)"
+        : "まだ決めていません(出退勤の端末で初めて入るときに決めます)";
+      return '<div class="item"><div class="top"><b>' + esc(p.name) + (p.code ? ' <span class="badge">' + esc(p.code) + "</span>" : ' <span class="badge bad">コード未登録</span>') +
+        '</b><span class="badge ' + (STATE_BADGE[p.state] || "") + '">' + esc(p.state) + "</span></div>" +
+        '<div class="sub" style="margin:2px 0 0">' + esc(detail) + (p.failsToday ? "・今日のまちがい " + p.failsToday + "回" : "") + "</div>" +
+        '<div class="acts"><button type="button" data-act="issue" data-name="' + esc(p.name) + '">仮の番号を発行</button>' +
+        (p.state === "停止" ? '<button type="button" class="go" data-act="unblock" data-name="' + esc(p.name) + '">停止を解除</button>' : "") + "</div></div>";
+    }).join("");
+  }
+  onAct("pinList", {
+    issue: function (b) {
+      var name = da(b, "name");
+      if (!confirm(name + " さんの仮の暗証番号を発行しますか？\n今までの番号は使えなくなります。仮の番号は今日のうちだけ使えます")) return;
+      msg("pinMsg", "");
+      acall("adminIssueTempPin", name).then(function (r) {
+        $("pinIssued").innerHTML = "<h2>" + esc(name) + " さんの仮の番号</h2>" + '<div class="bigpin">' + esc(r.pin) + "</div>" +
+          '<div class="note"><ul><li><b>電話で本人に直接伝えてください</b>(メール・LINE・紙に書いて渡さない)</li>' +
+          "<li>この番号はこの画面に1回だけ出ます。閉じる・ほかのタブに移る・読み直すと二度と出ません</li>" +
+          "<li>使えるのは<b>今日(" + esc(jpDate(r.until)) + ")のうちだけ</b>です</li>" +
+          "<li>本人が出退勤の iPad か前渡し申請で入ると、その場で自分の4桁を決めてもらいます(仮の番号と同じ番号は不可)</li></ul></div>" +
+          '<div class="acts"><button type="button" data-act="hide">伝えたので消す</button></div>';
+        $("pinIssued").hidden = false;
+        try { $("pinIssued").scrollIntoView({ block: "start" }); } catch (e) {}
+        return acall("adminPinStatus").then(function (d) { pinRows = d.rows; renderPins(); });
+      }).catch(function (e) { msg("pinMsg", errText(e), "err"); });
+    },
+    unblock: function (b) {
+      var name = da(b, "name");
+      if (!confirm(name + " さんの停止を解除しますか？(本人に確かめましたか)")) return;
+      acall("adminUnblock", name).then(function () { msg("pinMsg", name + " さんの停止を解除しました", "ok"); return loadPins(); })
+        .catch(function (e) { msg("pinMsg", errText(e), "err"); });
+    }
+  });
+  onAct("pinIssued", { hide: function () { $("pinIssued").innerHTML = ""; $("pinIssued").hidden = true; } });
+
+  // ---------- 前渡し(前渡し申請の「事務員用」と同じ関数) ----------
+  var advCur = "pending";
+  document.querySelectorAll("[data-adv]").forEach(function (b) { b.addEventListener("click", function () { advTab(b.getAttribute("data-adv")); }); });
+  function openAdv() {
+    var pays = S.payDays || [];
+    if (!$("dayPick").value) $("dayPick").value = pays[0] || S.today;
+    if (!$("advMonth").value) $("advMonth").value = S.today.slice(0, 7);
+    if (!$("pxDate").value) $("pxDate").value = S.today;
+    $("dayPays").textContent = pays.length ? "これからの支払日: " + pays.map(jpDate).join("・") + "(土日・祝日・年末年始に当たる回は前の平日に早めています)" : "";
+    $("pxName").innerHTML = '<option value="">選んでください</option>' + S.names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("");
+    $("pxMethod").innerHTML = '<option value="">選んでください</option>' + S.methods.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; }).join("");
+    advTab(advCur);
+  }
+  function advTab(name) {
+    advCur = name; msg("advMsg", "");
+    document.querySelectorAll("[data-adv]").forEach(function (b) { b.setAttribute("aria-selected", String(b.getAttribute("data-adv") === name)); });
+    document.querySelectorAll("[data-advpane]").forEach(function (p) { p.hidden = p.getAttribute("data-advpane") !== name; });
+    if (name === "pending") loadPending();
+    if (name === "day") loadDay();
+    if (name === "month") loadMonth();
+  }
+  function advErr(e) { msg("advMsg", errText(e), "err"); }
+  function itemHtml(a, acts) {
+    return '<div class="item"><div class="top"><b>' + esc(a.name) + "</b><span>" + esc(jpDate(a.date)) + " " + esc(yen(a.amount)) + " " + esc(a.method) + "</span></div>" +
+      '<div class="sub" style="margin:2px 0 0">' + '<span class="badge ' + esc(a.status) + '">' + esc(a.status) + "</span> " + esc(a.input) + " 申請 " + esc(a.at) +
+      (a.code ? "" : ' <span class="badge bad">コード未登録</span>') + (a.memo ? " / " + esc(a.memo) : "") + "</div>" + (acts || "") + "</div>";
+  }
+  function decideBtns(a) { return '<div class="acts"><button type="button" class="go" data-act="ok" data-id="' + esc(a.id) + '">承認</button><button type="button" class="danger" data-act="ng" data-id="' + esc(a.id) + '">却下</button></div>'; }
+  function loadPending() {
+    return acall("adminAdvances", S.today.slice(0, 7)).then(function (list) {
+      var p = list.filter(function (a) { return a.status === "申請中"; });
+      $("pendingList").innerHTML = !p.length ? '<p class="sub">申請中のものはありません</p>' : p.map(function (a) {
+        return itemHtml(a, (a.amount > S.max ? ' <span class="badge bad">上限超え</span>' : "") + decideBtns(a));
+      }).join("");
+    }, advErr);
+  }
+  function decide(id, d, memo) {
+    acall("adminAdvanceDecide", id, d, memo).then(function () { msg("advMsg", d + "しました", "ok"); return advCur === "day" ? loadDay() : loadPending(); }).catch(advErr);
+  }
+  var DECIDE = {
+    ok: function (b) { decide(da(b, "id"), "承認", ""); },
+    ng: function (b) { var memo = prompt("却下の理由(本人の画面には出ません。空でも可)", ""); if (memo === null) return; decide(da(b, "id"), "却下", memo); }
+  };
+  onAct("pendingList", DECIDE);
+  onAct("dayOut", DECIDE);
+  $("dayPick").addEventListener("change", loadDay);
+  function loadDay() {
+    var day = $("dayPick").value; if (!day) return Promise.resolve();
+    return acall("adminAdvances", day.slice(0, 7)).then(function (list) {
+      var on = list.filter(function (a) { return a.date === day; });
+      function block(title, rows) {
+        var tot = rows.reduce(function (s, a) { return s + a.amount; }, 0);
+        return "<h3>" + esc(title) + "(" + rows.length + "人 " + yen(tot) + ")</h3>" + (!rows.length ? '<p class="sub">なし</p>' :
+          '<div class="scroll"><table><thead><tr><th>氏名</th><th>コード</th><th class="num">金額</th></tr></thead><tbody>' +
+          rows.map(function (a) { return "<tr><td>" + esc(a.name) + "</td><td>" + esc(a.code || "未登録") + '</td><td class="num">' + esc(yen(a.amount)) + "</td></tr>"; }).join("") + "</tbody></table></div>");
+      }
+      var ok = on.filter(function (a) { return a.status === "承認"; });
+      var pend = on.filter(function (a) { return a.status === "申請中"; });
+      $("dayOut").innerHTML = block("振込(承認済み)", ok.filter(function (a) { return a.method === "振込"; })) +
+        block("手渡し(承認済み)", ok.filter(function (a) { return a.method === "手渡し"; })) +
+        (pend.length ? "<h3>まだ申請中(" + pend.length + "件)</h3>" + pend.map(function (a) { return itemHtml(a, decideBtns(a)); }).join("") : "");
+    }, advErr);
+  }
+  $("advMonth").addEventListener("change", loadMonth);
+  function loadMonth() {
+    var ym = $("advMonth").value; if (!ym) return Promise.resolve();
+    return acall("adminAdvances", ym).then(function (list) {
+      var inMonth = list.filter(function (a) { return a.date.slice(0, 7) === ym; });
+      var per = {}, order = [];
+      inMonth.filter(function (a) { return a.status === "承認"; }).forEach(function (a) {
+        if (!per[a.name]) { per[a.name] = { code: a.code, furikomi: 0, tewatashi: 0, n: 0 }; order.push(a.name); }
+        per[a.name][a.method === "振込" ? "furikomi" : "tewatashi"] += a.amount; per[a.name].n++;
+      });
+      var tot = { f: 0, t: 0 };
+      var rows = order.map(function (n) { var p = per[n]; tot.f += p.furikomi; tot.t += p.tewatashi;
+        return "<tr><td>" + esc(n) + "</td><td>" + esc(p.code || "未登録") + '</td><td class="num">' + p.n + '</td><td class="num">' + esc(yen(p.furikomi)) + '</td><td class="num">' + esc(yen(p.tewatashi)) + '</td><td class="num"><b>' + esc(yen(p.furikomi + p.tewatashi)) + "</b></td></tr>"; });
+      $("monthOut").innerHTML = (!order.length ? '<p class="sub">この月の承認済みはありません</p>' :
+        '<div class="scroll"><table><thead><tr><th>氏名</th><th>コード</th><th class="num">回数</th><th class="num">振込</th><th class="num">手渡し</th><th class="num">計</th></tr></thead><tbody>' + rows.join("") +
+        '<tr class="total"><td colspan="3">合計 ' + order.length + '人</td><td class="num">' + esc(yen(tot.f)) + '</td><td class="num">' + esc(yen(tot.t)) + '</td><td class="num">' + esc(yen(tot.f + tot.t)) + "</td></tr></tbody></table></div>") +
+        "<h3>すべての申請(" + inMonth.length + "件)</h3>" +
+        inMonth.map(function (a) { return itemHtml(a, a.status === "承認" ? '<div class="acts"><button type="button" class="danger" data-act="void" data-id="' + esc(a.id) + '">承認を取り消す</button></div>' : ""); }).join("");
+    }, advErr);
+  }
+  onAct("monthOut", {
+    void: function (b) {
+      var memo = prompt("承認を取り消す理由(例: 支払わなかった)", ""); if (memo === null) return;
+      acall("adminAdvanceVoid", da(b, "id"), memo).then(function () { msg("advMsg", "承認を取り消しました", "ok"); return loadMonth(); }).catch(advErr);
+    }
+  });
+  $("pxBtn").addEventListener("click", function () {
+    var name = $("pxName").value, date = $("pxDate").value, amount = Number($("pxAmount").value), method = $("pxMethod").value;
+    if (!name || !date || !(amount > 0) || !method) { msg("advMsg", "お名前・支払日・金額・受け取り方を入れてください", "err"); return; }
+    if (amount > S.max && !confirm(yen(amount) + " は上限(" + yen(S.max) + ")を超えています。記録しますか？")) return;
+    acall("adminAdvanceProxy", name, date, amount, method, $("pxMemo").value).then(function (r) {
+      msg("advMsg", name + " さん " + jpDate(date) + " " + yen(amount) + " " + method + " を記録しました" + (r.over ? "(上限超え)" : ""), "ok");
+      $("pxAmount").value = ""; $("pxMemo").value = "";
+    }).catch(advErr);
+  });
+
+  // ---------- 打刻の修正(端末の「打刻の修正」と同じ関数) ----------
+  var fixUi = { list: [], shifts: [], sel: null, by: "", names: [], places: [], shiftDefs: [] };
+  function fixMsg(text, kind) {
+    ["fixMsg", "fixEditMsg"].forEach(function (id) { msg(id, text, kind); });
+    var at = $("fixEdit").hidden ? $("fixMsg") : $("fixEditMsg");
+    if (text) { try { at.scrollIntoView({ block: "nearest" }); } catch (e) {} }
+  }
+  function toLocal(ts) { return ts ? String(ts).slice(0, 16).replace(" ", "T") : ""; }
+  function dayTime(ts, day) { if (!ts) return "—"; var d = String(ts).slice(0, 10); return (d !== day ? d.slice(5).replace("-", "/") + " " : "") + hm(ts); }
+  function closeFixEdit() { fixUi.sel = null; $("fixEdit").hidden = true; $("fixCancelBox").hidden = true; }
+  function closeAdd() { $("addEdit").hidden = true; }
+  function openFix() {
+    if (!$("fixMonth").value) $("fixMonth").value = S.today.slice(0, 7);
+    closeFixEdit(); closeAdd(); fixMsg(""); return loadFix();
+  }
+  ["fixMonth", "fixName", "fixOnlyOpen"].forEach(function (id) { $(id).addEventListener("change", function () { closeFixEdit(); fixMsg(""); loadFix(); }); });
+  function loadFix() {
+    return acall("adminPunchList", $("fixMonth").value || S.today.slice(0, 7), $("fixName").value, $("fixOnlyOpen").checked).then(function (d) {
+      fixUi.list = d.rows; fixUi.shifts = d.shifts; fixUi.names = d.names || []; fixUi.places = d.places || []; fixUi.shiftDefs = d.shiftDefs || [];
+      var sel = $("fixName"), was = sel.value;
+      sel.innerHTML = '<option value="">全員</option>' + fixUi.names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("");
+      sel.value = was;
+      renderFixTable(d.more);
+    }, function (e) { fixMsg(errText(e), "err"); });
+  }
+  function renderFixTable(more) {
+    var rows = fixUi.list;
+    $("fixTable").innerHTML = !rows.length ? '<p class="sub">' + ($("fixOnlyOpen").checked ? "退勤していない打刻はありません" : "この月の打刻はありません") + "</p>" :
+      "<table><thead><tr><th>勤務の日</th><th>氏名</th><th>勤務</th><th>出勤</th><th>退勤</th><th>実働</th><th>状態</th><th></th></tr></thead><tbody>" +
+      rows.map(function (r, i) {
+        var c = r.calc, fin = r.status === "退勤済", cancelled = r.status === "取消";
+        var work = c ? c.normal + c.night + c.ot + c.nightOt : r.workMin;
+        var st = esc(r.kind || r.status) + (r.bigLate ? '<span class="badge bad">大幅な遅刻</span>' : "") + (r.fixed ? '<span class="badge">修正' + r.fixes.length + "回</span>" : "");
+        return "<tr" + (cancelled ? ' class="cancelled"' : "") + "><td>" + esc(r.day.slice(5).replace("-", "/")) + "</td><td>" + esc(r.name) +
+          "</td><td>" + esc((r.shift || "なし") + (r.early ? " 早出" : "")) + "</td><td>" + esc(dayTime(r.in, r.day)) + "</td><td>" + esc(r.out ? dayTime(r.out, r.day) : "—") +
+          "</td><td>" + (fin && work != null ? dur(work) : "—") + "</td><td>" + st + "</td><td>" +
+          (cancelled ? "" : '<button type="button" data-act="fix" data-i="' + i + '">直す</button>') + "</td></tr>";
+      }).join("") + "</tbody></table>" + (more ? '<p class="sub">ほかに ' + more + " 件あります。名前で絞ってください</p>" : "");
+  }
+  onAct("fixTable", { fix: function (b) { openFixEdit(fixUi.list[Number(da(b, "i"))]); } });
+  function openFixEdit(r) {
+    if (!r) return;
+    closeAdd();
+    fixUi.sel = r; fixMsg("");
+    $("fixTarget").textContent = r.name + " さん " + r.day + " " + (r.shift || "勤務なし") + "(" + (r.kind || r.status) + ")";
+    var known = fixUi.shifts.indexOf(r.shift) >= 0;
+    $("fixShift").innerHTML = (known ? "" : '<option value="">' + esc(r.shift ? r.shift + "(今の勤務の表にない)" : "選んでください") + "</option>") +
+      fixUi.shifts.map(function (s) { return '<option value="' + esc(s) + '">' + esc(s) + "</option>"; }).join("");
+    $("fixShift").value = known ? r.shift : "";
+    $("fixDay").value = r.day; $("fixIn").value = toLocal(r.in); $("fixOut").value = toLocal(r.out || r.in); $("fixEarly").checked = !!r.early;
+    $("fixBy").value = fixUi.by; $("fixWhy").value = "";
+    $("fixCancelBox").hidden = true;
+    $("fixHist").innerHTML = (r.original ? "元の打刻: " + esc(r.original) + "<br>" : "") + (r.fixes || []).map(function (f) {
+      return esc(f.at.slice(0, 16) + " " + f.kind + "(" + f.by + ") " + f.what + " 理由: " + f.why);
+    }).join("<br>");
+    $("fixEdit").hidden = false;
+    try { $("fixEdit").scrollIntoView({ block: "start" }); } catch (e) {}
+  }
+  function fixSend(change) {
+    var r = fixUi.sel;
+    if (!r) return;
+    var by = $("fixBy").value.trim(), why = $("fixWhy").value.trim();
+    if (!by) { fixMsg("直した人の名前を入力してください", "err"); return; }
+    if (!why) { fixMsg("直す理由を入力してください", "err"); return; }
+    fixUi.by = by;
+    acall("adminPunchFix", r.row, { name: r.name, day: r.day, in: r.in }, change, by, why, PLACE_REC).then(function (res) {
+      closeFixEdit();
+      var m = r.name + " さんの " + r.day + " の打刻を" + (res.kind === "取消" ? "取り消しました" : "直しました(" + res.kind + ")") + (res.notes.length ? "。" + res.notes.join("。") : "");
+      return loadFix().then(function () { fixMsg(m, "ok"); });
+    }).catch(function (e) { fixMsg(errText(e), "err"); });
+  }
+  $("fixSave").addEventListener("click", function () {
+    var r = fixUi.sel;
+    if (!r) return;
+    var ch = {}, sh = $("fixShift").value, day = $("fixDay").value, inV = $("fixIn").value, outV = $("fixOut").value;
+    if (sh && sh !== r.shift) ch.shift = sh;
+    if (day && day !== r.day) ch.day = day;
+    if (inV && inV !== toLocal(r.in)) ch.in = inV;
+    var outBlank = !r.out && outV === toLocal(r.in);
+    if (outV && !outBlank && outV !== toLocal(r.out)) ch.out = outV;
+    if ($("fixEarly").checked !== !!r.early) ch.early = $("fixEarly").checked;
+    if (!Object.keys(ch).length && !r.out) { fixMsg("退勤の時刻を入れてください(今は出勤の日時が仮に入っています)", "err"); return; }
+    if (!Object.keys(ch).length) { fixMsg("直すところがありません(勤務・勤務の日・出勤・退勤・早出のどれかを変えてください)", "err"); return; }
+    fixSend(ch);
+  });
+  $("fixCancelAsk").addEventListener("click", function () {
+    var r = fixUi.sel;
+    if (!r) return;
+    $("fixCancelText").textContent = r.name + " さんの " + r.day + " の打刻を取り消しますか?(行は残り、集計に入らなくなります)";
+    $("fixCancelBox").hidden = false;
+  });
+  $("fixCancelNo").addEventListener("click", function () { $("fixCancelBox").hidden = true; });
+  $("fixCancelYes").addEventListener("click", function () { fixSend({ cancel: true }); });
+  $("fixClose").addEventListener("click", function () { closeFixEdit(); fixMsg(""); });
+  // 出勤を足す
+  function addMsg(text, kind) { msg("addMsg", text, kind); if (text) { try { $("addMsg").scrollIntoView({ block: "nearest" }); } catch (e) {} } }
+  function localAt(day, min) { var d = new Date(day + "T00:00:00"); d.setMinutes(d.getMinutes() + min); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+  function addShiftDef() { var v = $("addShift").value; return fixUi.shiftDefs.filter(function (x) { return x.name === v; })[0] || null; }
+  function addFillShifts() {
+    var key = $("addPlace").value, was = $("addShift").value;
+    var list = key ? fixUi.shiftDefs.filter(function (x) { return !x.places.length || x.places.indexOf(key) >= 0; }) : [];
+    $("addShift").innerHTML = '<option value="">' + (key ? "選んでください" : "先に置き場所を選んでください") + "</option>" + list.map(function (x) {
+      return '<option value="' + esc(x.name) + '">' + esc(x.label + " " + x.start + "〜" + (x.endMin > 24 * 60 ? "翌" : "") + x.end + (x.nextDay ? "(前の晩から)" : "")) + "</option>";
+    }).join("");
+    $("addShift").value = list.some(function (x) { return x.name === was; }) ? was : "";
+  }
+  function addFillIn() { var x = addShiftDef(), day = $("addDay").value; $("addIn").value = x && day ? localAt(day, x.startMin) : ""; }
+  $("addOpen").addEventListener("click", function () {
+    closeFixEdit(); fixMsg("");
+    $("addName").innerHTML = '<option value="">選んでください</option>' + fixUi.names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("");
+    $("addName").value = $("fixName").value || "";
+    $("addDay").value = S.today;
+    // 置き場所はこのページにないので、毎回選んでもらう
+    $("addPlace").innerHTML = '<option value="">選んでください</option>' + fixUi.places.map(function (x) { return '<option value="' + esc(x.key) + '">' + esc(x.short) + "</option>"; }).join("");
+    $("addPlace").value = "";
+    $("addShift").value = "";
+    addFillShifts(); addFillIn();
+    $("addOut").value = ""; $("addEarly").checked = false; $("addBy").value = fixUi.by; $("addWhy").value = "";
+    addMsg("");
+    $("addEdit").hidden = false;
+    try { $("addEdit").scrollIntoView({ block: "start" }); } catch (e) {}
+  });
+  $("addPlace").addEventListener("change", function () { addFillShifts(); addFillIn(); });
+  $("addShift").addEventListener("change", addFillIn);
+  $("addDay").addEventListener("change", addFillIn);
+  $("addClose").addEventListener("click", closeAdd);
+  $("addSave").addEventListener("click", function () {
+    var a = { name: $("addName").value, day: $("addDay").value, place: $("addPlace").value, shift: $("addShift").value,
+              in: $("addIn").value, out: $("addOut").value, early: $("addEarly").checked };
+    var by = $("addBy").value.trim(), why = $("addWhy").value.trim();
+    var miss = !a.name ? "出勤を足す人を選んでください" : !a.day ? "勤務の日を入れてください" : !a.place ? "置き場所を選んでください" :
+      !a.shift ? "勤務を選んでください" : !a.in ? "出勤の時刻を入れてください" : !by ? "直した人の名前を入力してください" : !why ? "出勤を足す理由を入力してください" : "";
+    if (miss) { addMsg(miss, "err"); return; }
+    fixUi.by = by;
+    var x = addShiftDef();
+    $("addSave").disabled = true;
+    acall("adminPunchAdd", a, by, why, PLACE_REC, newReqId()).then(function (res) {
+      $("addSave").disabled = false;
+      closeAdd();
+      var m = a.name + " さんの " + a.day + " の出勤を足しました(" + (x ? x.label : a.shift) + " 出勤 " + hm(res.rec.in) + (res.rec.out ? "・退勤 " + hm(res.rec.out) : "") + ")。" + res.notes.join("。");
+      $("fixMonth").value = a.day.slice(0, 7); $("fixName").value = a.name; $("fixOnlyOpen").checked = false;
+      return loadFix().then(function () { $("fixName").value = a.name; fixMsg(m, "ok"); });
+    }).catch(function (e) { $("addSave").disabled = false; addMsg(errText(e), "err"); });
+  });
+
+  // ---------- 名簿(端末の「名簿の管理」と同じ関数。置き場所はここにはない) ----------
+  var rosterUi = { editing: "", deleting: "" }, adminList = [];
+  function rosterMsg(text, kind) { msg("rosterMsg", text, kind); }
+  function epsonBox(html, ng) { var b = $("epsonMatch"); b.innerHTML = html || ""; b.hidden = !html; b.className = "warnbox" + (ng ? " ng" : ""); }
+  function openRoster() {
+    rosterUi = { editing: "", deleting: "" };
+    rosterMsg(""); epsonBox("");
+    acall("adminCodeInfo").then(renderCodeInfo, function () {});
+    return loadRoster();
+  }
+  function renderCodeInfo(info) {
+    var el = $("codeInfo");
+    var staff = "<br>名前の照合(エプソンの在職者): " + (info.staffAt ? "<b>" + esc(info.staffAt.slice(0, 16)) + "</b> 受け取り(" + info.staffCount + "人)" : "まだ受け取っていません(照合せずに足します)");
+    if (!info.epsonAt) {
+      el.innerHTML = "エプソンの従業員コードの一覧をまだ受け取っていないため、発行できません(給与ソフトのあるPCで一覧を送ってください)" + staff;
+      $("issueBtn").disabled = true;
+      return;
+    }
+    $("issueBtn").disabled = !info.next;
+    var over = info.over || [];
+    el.innerHTML = "エプソンの一覧: <b>" + esc(info.epsonAt.slice(0, 16)) + "</b> 受け取り(" + info.epsonCount + "件)／ " +
+      (info.next ? "次に発行する番号 <b>" + esc(info.next) + "</b>" : '<span class="msg err">' + esc(info.nextErr || "発行できません") + "</span>") +
+      (info.reserved.length ? "<br>エプソンにまだ登録していない人: " + info.reserved.map(function (r) { return esc(r.code + " " + r.name); }).join("、") : "") +
+      (over.length ? "<br>" + esc(info.issueDigits) + "桁より長い番号(発行には使いません): " + over.map(function (r) { return esc(r.code + (r.name ? " " + r.name : "") + (r.note ? "(" + r.note + ")" : "")); }).join("、") : "") + staff;
+  }
+  function loadRoster() { return acall("adminRoster").then(function (list) { adminList = list; renderRoster(); }, function (e) { rosterMsg(errText(e), "err"); }); }
+  function showRosterList(list) { if (Array.isArray(list)) { adminList = list; renderRoster(); return Promise.resolve(); } return loadRoster(); }
+  function renderRoster() {
+    $("rosterList").innerHTML = !adminList.length ? '<p class="sub">名簿に登録されている方はいません</p>' : adminList.map(function (p) {
+      var name = p.name;
+      var tag = (p.code ? '<span class="badge">' + esc(p.code) + "</span>" : '<span class="badge bad">コード未登録</span>') + (p.added ? ' <span class="badge warn">端末で追加</span>' : "");
+      if (rosterUi.editing === name) {
+        return '<div class="item"><div class="grid2"><input id="rsEditCode" type="text" inputmode="numeric" maxlength="10" aria-label="従業員コード" placeholder="従業員コード" value="' + esc(p.code || "") + '">' +
+          '<input id="rsEditName" type="text" maxlength="30" aria-label="新しい名前" value="' + esc(name) + '"></div>' +
+          '<div class="acts"><button type="button" class="go" data-act="save" data-name="' + esc(name) + '">保存</button><button type="button" data-act="cancel">やめる</button></div></div>';
+      }
+      if (rosterUi.deleting === name) {
+        var warn = p.status && p.status !== "退勤済" ? "本日は" + p.status + "です。" : "";
+        return '<div class="item"><div class="top"><b>' + esc(name) + "</b>" + tag + '</div><div class="warnbox ng">' + esc(name) + " さんを名簿から削除しますか？" + esc(warn) + "打刻・給食の記録は残ります。暗証番号は消えます。" +
+          '<div class="acts"><button type="button" class="danger-solid" data-act="delete-yes" data-name="' + esc(name) + '">削除する</button><button type="button" data-act="cancel">やめる</button></div></div></div>';
+      }
+      return '<div class="item"><div class="top"><b>' + esc(name) + "</b>" + tag + '</div><div class="acts"><button type="button" data-act="edit" data-name="' + esc(name) + '">修正</button>' +
+        '<button type="button" class="danger" data-act="delete" data-name="' + esc(name) + '">削除</button></div></div>';
+    }).join("");
+  }
+  onAct("rosterList", {
+    edit: function (b) { rosterMsg(""); rosterUi = { editing: da(b, "name"), deleting: "" }; renderRoster(); },
+    "delete": function (b) { rosterMsg(""); rosterUi = { editing: "", deleting: da(b, "name") }; renderRoster(); },
+    cancel: function () { rosterMsg(""); epsonBox(""); rosterUi = { editing: "", deleting: "" }; renderRoster(); },
+    "delete-yes": function (b) {
+      var name = da(b, "name");
+      acall("adminRosterDelete", name).then(function (list) {
+        rosterUi = { editing: "", deleting: "" }; rosterMsg(name + " さんを削除しました", "ok"); return showRosterList(list);
+      }).catch(function (e) { rosterMsg(errText(e), "err"); });
+    },
+    save: function (b) { epsonBox(""); rosterEditSave(da(b, "name"), $("rsEditName").value, $("rsEditCode").value, false); }
+  });
+  var editAsk = null;
+  function rosterEditSave(name, nn, cc, confirmed) {
+    acall("adminRosterSave", name, nn, cc, confirmed).then(function (list) {
+      if (list && list.confirm) {
+        editAsk = { name: name, nn: nn, cc: cc };
+        epsonBox("「" + esc(name) + "」さんの修正: " + esc(list.confirm) + '<div class="sub">同じ人の打ち間違いの直しなら保存してください。別の人なら、やめて名前かコードを確かめてください。</div>' +
+          '<div class="acts"><button type="button" class="go" data-act="edit-yes">このまま保存する</button><button type="button" data-act="edit-no">やめる</button></div>', true);
+        return;
+      }
+      epsonBox("");
+      rosterUi = { editing: "", deleting: "" }; rosterMsg(String(nn).trim() + " さんを保存しました", "ok"); return showRosterList(list);
+    }).catch(function (e) { epsonBox(""); rosterMsg(errText(e), "err"); });
+  }
+  var epsonPending = null;
+  function epsonCheck(nn, from, done) {
+    epsonBox("");
+    acall("adminEpsonMatch", nn).then(function (r) {
+      if (!r.at || r.inRoster || !r.matches.length) { done(); return; }
+      epsonPending = r;
+      var head = from === "issue" ? "エプソンの在職者に同じ名前の人がいるため、新しい番号は発行しません。<br>" : "";
+      var usable = r.matches.filter(function (m) { return !m.why; }).length, html;
+      var addBtn = function (m) { return '<button type="button" class="go" data-act="epson-code" data-code="' + esc(m.code) + '">この人として足す</button>'; };
+      var cancel = '<button type="button" data-act="epson-cancel">' + (usable ? "やめる" : "閉じる") + "</button>";
+      if (r.matches.length === 1) {
+        var m = r.matches[0], who = "エプソンの <b>" + esc(m.name) + "</b> さん(コード <b>" + esc(m.code) + "</b>)";
+        html = m.why ? head + who + "と同じ名前ですが、足せません。<div class=\"sub\">" + esc(m.why) + "</div><div class=\"acts\">" + cancel + "</div>"
+          : head + who + "として足します。よろしいですか?<div class=\"acts\">" + addBtn(m) + cancel + "</div>";
+      } else {
+        html = head + "エプソンの在職者に「" + esc(r.name) + "」さんが " + r.matches.length + "人います。どの人か選んでください(従業員コードはエプソンで確かめてください)" +
+          r.matches.map(function (m) {
+            return '<div class="item"><span class="badge">' + esc(m.code) + "</span>" + esc(m.name) + (m.why ? '<div class="sub">' + esc(m.why) + "</div>" : '<div class="acts">' + addBtn(m) + "</div>") + "</div>";
+          }).join("") + '<div class="acts">' + cancel + "</div>";
+      }
+      epsonBox(html, !usable);
+    }).catch(function (e) { rosterMsg(errText(e), "err"); });
+  }
+  onAct("epsonMatch", {
+    "epson-cancel": function () { epsonBox(""); rosterMsg(""); },
+    "epson-code": function (b) {
+      var r = epsonPending, code = da(b, "code");
+      if (!r) return;
+      acall("adminRosterSave", "", r.name, code).then(function (list) {
+        epsonBox(""); $("rosterNew").value = ""; $("rosterNewCode").value = ""; $("issueName").value = "";
+        rosterMsg(r.name + " さんを、エプソンの従業員コード " + code + " で追加しました", "ok"); return showRosterList(list);
+      }).catch(function (e) { epsonBox(""); rosterMsg(errText(e), "err"); });
+    },
+    "edit-yes": function () { if (editAsk) rosterEditSave(editAsk.name, editAsk.nn, editAsk.cc, true); },
+    "edit-no": function () { epsonBox(""); rosterMsg(""); }
+  });
+  function rosterAdd(nn, cc) {
+    acall("adminRosterSave", "", nn, cc).then(function (list) {
+      $("rosterNew").value = ""; $("rosterNewCode").value = "";
+      rosterMsg(nn + " さんを追加しました", "ok"); return showRosterList(list);
+    }).catch(function (e) { rosterMsg(errText(e), "err"); });
+  }
+  $("rosterAddBtn").addEventListener("click", function () {
+    var nn = $("rosterNew").value.trim(), cc = $("rosterNewCode").value.trim();
+    rosterMsg("");
+    if (!nn) { rosterMsg("名前を入力してください", "err"); return; }
+    if (cc) { epsonBox(""); rosterAdd(nn, cc); return; }
+    epsonCheck(nn, "add", function () { rosterAdd(nn, ""); });
+  });
+  $("issueBtn").addEventListener("click", function () {
+    var nn = $("issueName").value.trim();
+    rosterMsg("");
+    if (!nn) { rosterMsg("名前を入力してください", "err"); return; }
+    epsonCheck(nn, "issue", function () {
+      acall("adminIssueCode", nn).then(function (r) {
+        $("issueName").value = "";
+        renderCodeInfo(r.info);
+        rosterMsg(nn + " さんを登録しました。従業員コードは " + r.code + " です(エプソンへの登録は給与ソフトのあるPCで)", "ok");
+        return showRosterList(r.roster);
+      }).catch(function (e) { rosterMsg(errText(e), "err"); });
+    });
+  });
+
+  // ---------- 月次集計 ----------
+  var lastMonthly = null;
+  function prevMonthKey() { var y = +S.today.slice(0, 4), m = +S.today.slice(5, 7) - 1; if (m < 1) { m = 12; y--; } return y + "-" + pad(m); }
+  function openMonthly() {
+    if (!$("mPick").value) $("mPick").value = prevMonthKey();
+    var first = S.today.slice(8, 10) === "01";
+    $("monthlyToday").hidden = !first;
+    $("monthlyToday").textContent = "今日は1日です。前月(" + prevMonthKey().replace("-", "年") + "月)分の集計を作成してください。";
+    return renderMonthly();
+  }
+  $("mPick").addEventListener("change", function () { msg("monthlyMsg", ""); renderMonthly(); });
+  function renderMonthly() {
+    var ym = $("mPick").value || prevMonthKey();
+    $("csvFallback").hidden = true; $("monthlyCsv").disabled = true;
+    return acall("adminMonthly", ym).then(function (s) {
+      lastMonthly = { ym: ym, data: s };
+      $("monthlyWarn").hidden = !s.warns.length;
+      $("monthlyWarn").innerHTML = "確認してください<ul>" + s.warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul>";
+      var H = ["normal", "night", "ot", "nightOt"];
+      var tot = { days: 0, mealQty: 0, mealYen: 0, leave: 0, normal: 0, night: 0, ot: 0, nightOt: 0 };
+      s.rows.forEach(function (p) { tot.days += p.days; tot.mealQty += p.mealQty; tot.mealYen += p.mealYen; tot.leave += p.leave; H.forEach(function (k) { tot[k] += Number(p[k]); }); });
+      $("monthlyTable").innerHTML = !s.rows.length ? '<p class="sub">この月の記録はありません</p>' :
+        '<table><thead><tr><th>コード</th><th>氏名</th><th class="num">出勤日数</th><th class="num">普通勤務</th><th class="num">深夜</th><th class="num">普通残業</th><th class="num">深夜残業</th>' +
+        '<th class="num">早退</th><th class="num">給食</th><th class="num">給食代</th></tr></thead><tbody>' +
+        s.rows.map(function (p) {
+          return "<tr><td>" + (p.code ? esc(p.code) : '<span class="badge bad">未登録</span>') + "</td><td>" + esc(p.name) + '</td><td class="num">' + p.days + (p.open ? "(未退勤" + p.open + ")" : "") +
+            "</td>" + H.map(function (k) { return '<td class="num">' + esc(p[k]) + "</td>"; }).join("") + '<td class="num">' + (p.leave || "") +
+            '</td><td class="num">' + p.mealQty + '個</td><td class="num">' + yen(p.mealYen) + "</td></tr>";
+        }).join("") +
+        '<tr class="total"><td colspan="2">合計 ' + s.rows.length + '人</td><td class="num">' + tot.days + "</td>" +
+        H.map(function (k) { return '<td class="num">' + tot[k].toFixed(2) + "</td>"; }).join("") + '<td class="num">' + (tot.leave || "") +
+        '</td><td class="num">' + tot.mealQty + '個</td><td class="num">' + yen(tot.mealYen) + "</td></tr></tbody></table>" +
+        (s.fixed ? '<p class="sub">管理者が直した打刻 ' + s.fixed + "件(うち取り消し " + (s.cancelled || 0) + "件)。直したあとの値で数えています(記録はシート「打刻の修正」)</p>" : "");
+      $("monthlyCsv").disabled = !s.rows.length || s.blocking;
+    }, function (e) { msg("monthlyMsg", errText(e), "err"); });
+  }
+  $("monthlyCsv").addEventListener("click", function () {
+    if (!lastMonthly || lastMonthly.data.blocking) return;
+    var csv = lastMonthly.data.csv, filename = "勤怠給食_" + lastMonthly.ym.replace("-", "") + ".csv";
+    try {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      msg("monthlyMsg", filename + " を保存しました(ブラウザの保存先を確認してください)", "ok");
+    } catch (e) {
+      var ta = $("csvFallback"); ta.value = csv.replace(/^﻿/, ""); ta.hidden = false; ta.select();
+      msg("monthlyMsg", "この画面ではファイルを保存できません。下の内容をコピーして「" + filename + "」として保存してください", "err");
+    }
+  });
+
+  // ---------- 本日の記録 ----------
+  $("todayReload").addEventListener("click", function () { loadToday(); });
+  function loadToday() {
+    return acall("adminToday").then(function (t) {
+      $("logTable").innerHTML = !t.punches.length ? '<p class="sub">本日の打刻はまだありません</p>' :
+        "<table><thead><tr><th>氏名</th><th>勤務</th><th>出勤</th><th>退勤</th><th>深夜</th><th>早出・残業</th><th>実働</th><th>状態</th></tr></thead><tbody>" +
+        t.punches.map(function (r) {
+          var fin = r.status === "退勤済", c = r.calc;
+          var ot = c ? c.ot + c.nightOt : (r.overtime ? r.otMin : 0), work = c ? c.normal + c.night + c.ot + c.nightOt : r.workMin;
+          return "<tr><td>" + esc(r.name) + "</td><td>" + esc((r.shift || "") + (r.early ? " 早出" : "")) + "</td><td>" + hm(r.in) + "</td><td>" + (fin ? hm(r.out) : "—") +
+            "</td><td>" + (c && c.night + c.nightOt ? dur(c.night + c.nightOt) : "—") + "</td><td>" + (fin && ot ? dur(ot) : "—") + "</td><td>" + (fin ? dur(work) : "—") +
+            "</td><td>" + esc(r.status + (r.bigLate ? "(大幅な遅刻: " + r.lateReason + ")" : "") + (r.reason ? "(早退: " + r.reason + ")" : "") + (r.fixed ? "(管理者が修正)" : "")) + "</td></tr>";
+        }).join("") + "</tbody></table>";
+      var total = 0;
+      $("mealTable").innerHTML = !t.meals.length ? '<p class="sub">本日の給食の注文はまだありません</p>' :
+        "<table><thead><tr><th>氏名</th><th>時刻</th><th>メニュー</th><th>サイズ</th><th>個数</th><th>金額</th><th>設置場所</th></tr></thead><tbody>" +
+        t.meals.map(function (m) {
+          total += m.price;
+          return "<tr><td>" + esc(m.name) + "</td><td>" + hm(m.time) + "</td><td>" + esc(m.menu) + "</td><td>" + esc(m.size) + "</td><td>" + m.qty + "</td><td>" + yen(m.price) + "</td><td>" + esc(m.place) + "</td></tr>";
+        }).join("") + '<tr class="total"><td colspan="5">合計</td><td>' + yen(total) + "</td><td></td></tr></tbody></table>";
+    }, function (e) { msg("mainMsg", errText(e), "err"); });
+  }
+})();
+</script>
+</body>
+</html>
