@@ -100,7 +100,9 @@
     <div class="tabs" role="tablist">
       <button type="button" role="tab" data-tab="pins">暗証番号</button>
       <button type="button" role="tab" data-tab="adv">前渡し</button>
+      <button type="button" role="tab" data-tab="yukyu">有給</button>
       <button type="button" role="tab" data-tab="fix">打刻の修正</button>
+      <button type="button" role="tab" data-tab="sougei">送迎</button>
       <button type="button" role="tab" data-tab="roster">名簿</button>
       <button type="button" role="tab" data-tab="monthly">月次集計</button>
       <button type="button" role="tab" data-tab="today">本日の記録</button>
@@ -159,6 +161,21 @@
       </div>
     </div>
 
+    <!-- 有給申請(2026-10-29。docs/yukyu.md「端末からの有給申請」) -->
+    <div data-pane="yukyu" hidden>
+      <div class="card">
+        <h2>有給の申請中</h2>
+        <p class="sub">承認した日だけを PC が W: の有給申請・台帳・勤務表とエプソンの値にします。却下・取り消しの日は残日数から引きません。「出勤あり」の日は、その日に出勤の打刻があります(1日の有給とは重なりません)。</p>
+        <p id="ykMsg" class="msg"></p>
+        <div id="ykPending"></div>
+      </div>
+      <div class="card">
+        <h2>月の一覧</h2>
+        <label for="ykMonth">有給の日の月</label><input id="ykMonth" type="month">
+        <div id="ykMonthOut" style="margin-top:10px"></div>
+      </div>
+    </div>
+
     <!-- 打刻の修正 -->
     <div data-pane="fix" hidden>
       <div class="card">
@@ -209,6 +226,72 @@
         <label for="addWhy">理由(必須)</label><input id="addWhy" type="text" maxlength="200">
         <div class="acts"><button id="addSave" class="go" type="button">出勤を足す</button><button id="addClose" type="button">閉じる</button></div>
         <p id="addMsg" class="msg"></p>
+      </div>
+    </div>
+
+    <!-- 送迎(2026-10-29 Takeshi 決定。docs/kintai-app.md「送迎」) -->
+    <div data-pane="sougei" hidden>
+      <div class="card">
+        <h2>送迎</h2>
+        <p class="sub">運転手が端末で登録した送迎(1行 = 片道1人)。乗せた人にその日の出勤(帰りは退勤)の打刻がないものは「確認が要る」で、直すか「認める」まで手当に入れません。行は消さず、直した記録が残ります。</p>
+        <label for="sgMonth">勤務の月</label><input id="sgMonth" type="month">
+        <p id="sgMsg" class="msg"></p>
+        <div id="sgNotice"></div>
+        <h3>確認が要る</h3>
+        <div id="sgChecks"></div>
+        <h3>運転手ごとの合計(送迎手当)</h3>
+        <div id="sgSummary" class="scroll"></div>
+        <button id="sgCsv" class="primary" type="button" disabled>送迎手当の CSV を保存</button>
+        <textarea id="sgCsvFallback" hidden></textarea>
+        <h3>一覧</h3>
+        <button id="sgAddOpen" type="button">＋ 送迎を足す(押し忘れ・端末が使えなかった日)</button>
+        <div id="sgList" class="scroll" style="margin-top:8px"></div>
+      </div>
+      <div id="sgEdit" class="card" hidden>
+        <h2>送迎を確かめる・直す</h2>
+        <p id="sgEdTarget" class="sub"></p>
+        <label for="sgEdDate">日付(運転手の勤務の日。3直は 0:30 の日)</label><input id="sgEdDate" type="date">
+        <label for="sgEdDir">向き</label><select id="sgEdDir"><option value="行き">行き</option><option value="帰り">帰り</option></select>
+        <label for="sgEdDriver">運転手</label><select id="sgEdDriver"></select>
+        <label for="sgEdPas">乗せた人</label><input id="sgEdPas" type="text" maxlength="30" list="sgTargetList" autocomplete="off">
+        <label for="sgEdBy">直した人(必須)</label><input id="sgEdBy" type="text" maxlength="30">
+        <label for="sgEdWhy">理由(必須)</label><input id="sgEdWhy" type="text" maxlength="200">
+        <div id="sgEdHist" class="sub" style="margin-top:8px"></div>
+        <div class="acts">
+          <button id="sgEdSave" class="go" type="button">この内容で直す</button>
+          <button id="sgEdApprove" type="button">認める(打刻がなくても手当に数える)</button>
+          <button id="sgEdCancel" class="danger" type="button">この送迎を取り消す</button>
+          <button id="sgEdClose" type="button">閉じる</button>
+        </div>
+        <p id="sgEdMsg" class="msg"></p>
+      </div>
+      <div id="sgAdd" class="card" hidden>
+        <h2>送迎を足す</h2>
+        <p class="sub">同じ日・同じ向きで、ほかの運転手が登録済みの人は足せません。1台に4人まで。端末からは同じ日・同じ向きは1回だけですが、ここでは登録済みの送迎に乗せた人を足せます(乗せた人の入れ替えは一覧の「直す」)。</p>
+        <label for="sgAdDate">日付(運転手の勤務の日)</label><input id="sgAdDate" type="date">
+        <label for="sgAdDir">向き</label><select id="sgAdDir"><option value="行き">行き</option><option value="帰り">帰り</option></select>
+        <label for="sgAdDriver">運転手</label><select id="sgAdDriver"></select>
+        <label>乗せた人(1〜4人。空の欄は使いません)</label>
+        <div class="grid2">
+          <input id="sgAdP1" type="text" maxlength="30" list="sgTargetList" autocomplete="off" aria-label="乗せた人1">
+          <input id="sgAdP2" type="text" maxlength="30" list="sgTargetList" autocomplete="off" aria-label="乗せた人2">
+          <input id="sgAdP3" type="text" maxlength="30" list="sgTargetList" autocomplete="off" aria-label="乗せた人3">
+          <input id="sgAdP4" type="text" maxlength="30" list="sgTargetList" autocomplete="off" aria-label="乗せた人4">
+        </div>
+        <label for="sgAdBy">直した人(必須)</label><input id="sgAdBy" type="text" maxlength="30">
+        <label for="sgAdWhy">理由(必須)</label><input id="sgAdWhy" type="text" maxlength="200">
+        <div class="acts"><button id="sgAdSave" class="go" type="button">送迎を足す</button><button id="sgAdClose" type="button">閉じる</button></div>
+        <p id="sgAdMsg" class="msg"></p>
+      </div>
+      <div class="card">
+        <h2>送迎対象者</h2>
+        <p class="sub">運転手の端末の一覧に出る人。運転手が名前を入力して足した人には「新しい」が付きます(送迎代を引き始めるかは別に決めてください)。</p>
+        <div class="grid2">
+          <div><label for="sgTgName">名前</label><input id="sgTgName" type="text" maxlength="30" autocomplete="off"></div>
+          <div><label>&nbsp;</label><button id="sgTgAdd" class="go" type="button">一覧に足す</button></div>
+        </div>
+        <div id="sgTargets"></div>
+        <datalist id="sgTargetList"></datalist>
       </div>
     </div>
 
@@ -361,7 +444,7 @@
   setInterval(checkIdle, 1000);
 
   var CLEAR_HTML = ["pinIssued", "pinList", "pinSummary", "pendingList", "dayOut", "dayPays", "monthOut", "fixTable", "fixHist", "codeInfo", "epsonMatch", "rosterList",
-    "monthlyWarn", "monthlyTable", "logTable", "mealTable"];
+    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut"];
   var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "issueName", "csvFallback"];
   function logout(note) {
     if (token) { try { send("adminLogout", [token], function () {}, function () {}); } catch (e) {} }
@@ -370,7 +453,7 @@
     CLEAR_HTML.forEach(function (id) { $(id).innerHTML = ""; });
     CLEAR_VAL.forEach(function (id) { $(id).value = ""; });
     ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
-    ["mainMsg", "pinMsg", "advMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg"].forEach(function (id) { msg(id, ""); });
+    ["mainMsg", "pinMsg", "advMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg"].forEach(function (id) { msg(id, ""); });
     $("busy").hidden = true; $("vMain").hidden = true; $("logoutBtn").hidden = true; $("vLogin").hidden = false;
     msg("loginMsg", note || "", note ? "err" : "");
     window.scrollTo(0, 0);
@@ -405,7 +488,9 @@
     document.querySelectorAll("[data-pane]").forEach(function (p) { p.hidden = p.getAttribute("data-pane") !== name; });
     if (name === "pins") loadPins();
     if (name === "adv") openAdv();
+    if (name === "yukyu") openYukyu();
     if (name === "fix") openFix();
+    if (name === "sougei") openSougei();
     if (name === "roster") openRoster();
     if (name === "monthly") openMonthly();
     if (name === "today") loadToday();
@@ -574,6 +659,59 @@
       msg("advMsg", name + " さん " + jpDate(date) + " " + yen(amount) + " " + method + " を記録しました" + (r.over ? "(上限超え)" : ""), "ok");
       $("pxAmount").value = ""; $("pxMemo").value = "";
     }).catch(advErr);
+  });
+
+  // ---------- 有給申請(2026-10-29。adminYukyuList・adminYukyuDecide・adminYukyuVoid) ----------
+  function ykErr(e) { msg("ykMsg", errText(e), "err"); }
+  function openYukyu() {
+    if (!$("ykMonth").value) $("ykMonth").value = S.today.slice(0, 7);
+    loadYukyu();
+  }
+  function ykDays(rs) { return rs.map(function (r) { return esc(jpDate(r.date)) + (r.kind === "半日" ? "半日" : "") + (r.punched ? ' <span class="badge warn">出勤あり</span>' : ""); }).join("・"); }
+  function ykGroups(rows) {
+    var by = {}, order = [];
+    rows.forEach(function (r) { if (!by[r.id]) { by[r.id] = []; order.push(r.id); } by[r.id].push(r); });
+    return order.map(function (id) { return by[id]; });
+  }
+  function loadYukyu() {
+    var ym = $("ykMonth").value || S.today.slice(0, 7);
+    return acall("adminYukyuList", ym).then(function (d) {
+      var groups = ykGroups(d.rows.filter(function (r) { return r.status === "申請中"; }));
+      $("ykPending").innerHTML = !groups.length ? '<p class="sub">申請中のものはありません</p>' : groups.map(function (rs) {
+        var p = d.people[rs[0].name] || {}, tot = rs.reduce(function (s, r) { return s + r.days; }, 0);
+        return '<div class="item"><div class="top"><b>' + esc(rs[0].name) + (rs[0].code ? ' <span class="badge">' + esc(rs[0].code) + "</span>" : ' <span class="badge bad">コード未登録</span>') +
+          "</b><span>" + esc(rs[0].factory) + " 合計 " + tot + "日</span></div>" +
+          '<div class="sub" style="margin:2px 0 0">' + ykDays(rs) + "<br>申請 " + esc(rs[0].at) + "・台帳の残り " + esc(p.zan == null ? "未受け取り" : p.zan + "日") +
+          (p.asOf ? "(" + esc(jpDate(p.asOf)) + " 時点)" : "") + "・使える残(この申請も引いたあと) " + esc(p.usable == null ? "—" : p.usable + "日") + "</div>" +
+          '<div class="acts"><button type="button" class="go" data-act="ok" data-id="' + esc(rs[0].id) + '">承認</button><button type="button" class="danger" data-act="ng" data-id="' + esc(rs[0].id) + '">却下</button></div></div>';
+      }).join("");
+      var inMonth = d.rows.filter(function (r) { return r.date.slice(0, 7) === ym; });
+      var per = {}, names = [];
+      inMonth.filter(function (r) { return r.status === "承認"; }).forEach(function (r) { if (!per[r.name]) { per[r.name] = 0; names.push(r.name); } per[r.name] += r.days; });
+      $("ykMonthOut").innerHTML = (!names.length ? '<p class="sub">この月の承認済みはありません</p>' :
+        '<div class="scroll"><table><thead><tr><th>氏名</th><th class="num">承認済みの日数</th></tr></thead><tbody>' +
+        names.map(function (n) { return "<tr><td>" + esc(n) + '</td><td class="num">' + per[n] + "</td></tr>"; }).join("") + "</tbody></table></div>") +
+        "<h3>すべての日(" + inMonth.length + "件)</h3>" + (!inMonth.length ? '<p class="sub">なし</p>' : inMonth.map(function (r) {
+          return '<div class="item"><div class="top"><b>' + esc(r.name) + "</b><span>" + esc(jpDate(r.date)) + " " + esc(r.kind) + "</span></div>" +
+            '<div class="sub" style="margin:2px 0 0"><span class="badge ' + esc(r.status) + '">' + esc(r.status) + "</span> " + esc(r.factory) + " 申請 " + esc(r.at) +
+            (r.punched ? ' <span class="badge warn">出勤あり</span>' : "") + (r.memo ? " / " + esc(r.memo) : "") + "</div>" +
+            (r.status === "承認" ? '<div class="acts"><button type="button" class="danger" data-act="void" data-id="' + esc(r.id) + '" data-date="' + esc(r.date) + '">この日の承認を取り消す</button></div>' : "") + "</div>";
+        }).join(""));
+    }, ykErr);
+  }
+  $("ykMonth").addEventListener("change", loadYukyu);
+  onAct("ykPending", {
+    ok: function (b) { acall("adminYukyuDecide", da(b, "id"), "承認", "").then(function (r) { msg("ykMsg", "承認しました(" + r.count + "日)", "ok"); return loadYukyu(); }).catch(ykErr); },
+    ng: function (b) {
+      var memo = prompt("却下の理由(本人の画面には出ません。空でも可)", ""); if (memo === null) return;
+      acall("adminYukyuDecide", da(b, "id"), "却下", memo).then(function (r) { msg("ykMsg", "却下しました(" + r.count + "日)", "ok"); return loadYukyu(); }).catch(ykErr);
+    }
+  });
+  onAct("ykMonthOut", {
+    void: function (b) {
+      var memo = prompt("承認を取り消す理由(例: 出勤した)。PC がもう台帳に書いた日は、次の集計で「台帳から消す日」として出ます", ""); if (memo === null) return;
+      acall("adminYukyuVoid", da(b, "id"), da(b, "date"), memo).then(function () { msg("ykMsg", "承認を取り消しました", "ok"); return loadYukyu(); }).catch(ykErr);
+    }
   });
 
   // ---------- 打刻の修正(端末の「打刻の修正」と同じ関数) ----------
@@ -902,6 +1040,170 @@
     } catch (e) {
       var ta = $("csvFallback"); ta.value = csv.replace(/^﻿/, ""); ta.hidden = false; ta.select();
       msg("monthlyMsg", "この画面ではファイルを保存できません。下の内容をコピーして「" + filename + "」として保存してください", "err");
+    }
+  });
+
+  // ---------- 送迎(2026-10-29) ----------
+  // サーバー: adminSougeiList(月の一覧・運転手ごとの合計・確認が要る行・送迎対象者)/ adminSougeiEdit(直す・取り消す・認める)/
+  //           adminSougeiAdd(足す)/ adminSougeiTarget(送迎対象者の 確認した・外す・戻す・足す)。どれも最初に requireAdmin_
+  var sgData = null, sgSel = null;
+  var SG_JUDGE = { ok: ["数える", "good"], approved: ["認めた", "good"], check: ["確認が要る", "bad"], wait: ["退勤待ち", "warn"], cancel: ["取消", "bad"] };
+  CLEAR_HTML.push("sgNotice", "sgChecks", "sgSummary", "sgList", "sgTargets", "sgEdTarget", "sgEdHist", "sgTargetList");
+  CLEAR_VAL.push("sgEdPas", "sgEdBy", "sgEdWhy", "sgAdP1", "sgAdP2", "sgAdP3", "sgAdP4", "sgAdBy", "sgAdWhy", "sgTgName", "sgCsvFallback");
+  function openSougei() {
+    sgData = null; sgSel = null;
+    ["sgEdit", "sgAdd", "sgCsvFallback"].forEach(function (id) { $(id).hidden = true; });
+    msg("sgMsg", "");
+    if (!$("sgMonth").value) $("sgMonth").value = S.today.slice(0, 7);
+    return loadSougei();
+  }
+  $("sgMonth").addEventListener("change", function () { $("sgEdit").hidden = true; msg("sgMsg", ""); loadSougei(); });
+  function loadSougei() {
+    $("sgCsv").disabled = true;
+    return acall("adminSougeiList", $("sgMonth").value || S.today.slice(0, 7)).then(function (d) { sgData = d; renderSougei(); },
+      function (e) { msg("sgMsg", errText(e), "err"); });
+  }
+  function sgJudge(r) { var j = SG_JUDGE[r.judge] || [r.judge, ""]; return '<span class="badge ' + j[1] + '">' + esc(j[0]) + "</span>"; }
+  function sgDay(d) { return esc(String(d).slice(5).replace("-", "/")); }
+  function renderSougei() {
+    var d = sgData;
+    var news = d.targets.filter(function (t) { return t.notice === "新しい"; });
+    $("sgNotice").innerHTML = !news.length ? "" : '<div class="warnbox"><b>新しい送迎対象者 ' + news.length + "人</b>(運転手が端末で名前を入力して足した人。名前の間違いがないか・送迎代を引くかを確かめてください)" +
+      news.map(function (t) {
+        return '<div class="item"><div class="top"><span>' + esc(t.name) + ' <span class="badge warn">新しい</span></span><span class="sub">' + esc(t.at) + " " + esc(t.by) + "</span></div>" +
+          '<div class="acts"><button type="button" data-act="tseen" data-name="' + esc(t.name) + '">確認した</button></div></div>';
+      }).join("") + "</div>";
+    var checks = [];
+    d.rows.forEach(function (r, i) { if (r.judge === "check" || r.judge === "wait") checks.push([r, i]); });
+    $("sgChecks").innerHTML = !checks.length ? '<p class="sub">ありません</p>' : checks.map(function (x) {
+      var r = x[0];
+      return '<div class="item"><div class="top"><span>' + sgDay(r.date) + " " + esc(r.dir) + " " + esc(r.driver) + " → " + esc(r.passenger) + " " + sgJudge(r) + "</span></div>" +
+        '<div class="sub">' + esc(r.why) + "(登録 " + esc(r.from) + ")</div>" +
+        '<div class="acts"><button type="button" class="go" data-act="edit" data-i="' + x[1] + '">確かめる・直す</button></div></div>';
+    }).join("");
+    var tot = { go: 0, back: 0, count: 0, yen: 0, check: 0 };
+    d.summary.forEach(function (s) { ["go", "back", "count", "yen", "check"].forEach(function (k) { tot[k] += s[k]; }); tot.check += s.wait; });
+    $("sgSummary").innerHTML = !d.summary.length ? '<p class="sub">運転手がいません(名簿の「送迎」の列に「運転手」と書いてください)</p>' :
+      '<table><thead><tr><th>コード</th><th>運転手</th><th class="num">行き</th><th class="num">帰り</th><th class="num">片道の人数</th><th class="num">送迎手当</th><th class="num">確認が要る</th></tr></thead><tbody>' +
+      d.summary.map(function (s) {
+        return "<tr><td>" + (s.code ? esc(s.code) : '<span class="badge bad">未登録</span>') + "</td><td>" + esc(s.driver) + '</td><td class="num">' + s.go + '</td><td class="num">' + s.back +
+          '</td><td class="num">' + s.count + '</td><td class="num">' + esc(yen(s.yen)) + '</td><td class="num">' + ((s.check + s.wait) || "") + "</td></tr>";
+      }).join("") + '<tr class="total"><td colspan="2">合計</td><td class="num">' + tot.go + '</td><td class="num">' + tot.back + '</td><td class="num">' + tot.count +
+      '</td><td class="num">' + esc(yen(tot.yen)) + '</td><td class="num">' + (tot.check || "") + "</td></tr></tbody></table>" +
+      '<p class="sub">片道1人 ' + esc(yen(d.yen)) + "。確認が要る・退勤待ちの分は入っていません。</p>";
+    var notes = d.blocking.concat(d.warns);
+    if (notes.length) msg("sgMsg", notes.join("\n"), d.blocking.length ? "err" : "");
+    $("sgCsv").disabled = !!d.blocking.length || !d.summary.length;
+    $("sgList").innerHTML = !d.rows.length ? '<p class="sub">この月の送迎はありません</p>' :
+      '<table><thead><tr><th>日付</th><th>向き</th><th>運転手</th><th>乗せた人</th><th>登録</th><th>判定</th><th></th></tr></thead><tbody>' +
+      d.rows.map(function (r, i) {
+        return "<tr" + (r.judge === "cancel" ? ' class="cancelled"' : "") + "><td>" + sgDay(r.date) + "</td><td>" + esc(r.dir) + "</td><td>" + esc(r.driver) + "</td><td>" + esc(r.passenger) +
+          "</td><td>" + esc(r.from) + (r.history ? "・直した" : "") + "</td><td>" + sgJudge(r) + "</td><td>" +
+          (r.judge === "cancel" ? "" : '<button type="button" data-act="edit" data-i="' + i + '">直す</button>') + "</td></tr>";
+      }).join("") + "</tbody></table>";
+    $("sgTargets").innerHTML = !d.targets.length ? '<p class="sub">まだいません</p>' : d.targets.map(function (t) {
+      var off = t.status === "外す";
+      return '<div class="item"><div class="top"><span>' + esc(t.name) + (off ? ' <span class="badge">外した</span>' : "") + (t.notice === "新しい" ? ' <span class="badge warn">新しい</span>' : "") +
+        '</span><span class="acts" style="margin-top:0">' + (off ? '<button type="button" data-act="trestore" data-name="' + esc(t.name) + '">戻す</button>'
+          : '<button type="button" class="danger" data-act="tremove" data-name="' + esc(t.name) + '">一覧から外す</button>') + "</span></div></div>";
+    }).join("");
+    $("sgTargetList").innerHTML = d.targets.filter(function (t) { return t.status !== "外す"; }).map(function (t) { return '<option value="' + esc(t.name) + '"></option>'; }).join("");
+  }
+  function sgDriverOptions(sel) {
+    var drv = sgData.drivers, rest = sgData.names.filter(function (n) { return drv.indexOf(n) < 0; });
+    if (sel && drv.indexOf(sel) < 0 && rest.indexOf(sel) < 0) rest.unshift(sel);
+    return '<option value="">選んでください</option><optgroup label="運転手">' + drv.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("") +
+      '</optgroup><optgroup label="ほかの人">' + rest.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("") + "</optgroup>";
+  }
+  function openSgEdit(r) {
+    sgSel = r;
+    $("sgAdd").hidden = true;
+    $("sgEdTarget").textContent = r.date + " " + r.dir + " / 運転手 " + r.driver + " / 乗せた人 " + r.passenger + "(" + (SG_JUDGE[r.judge] || [r.judge])[0] + (r.why ? ": " + r.why : "") + ")";
+    $("sgEdDate").value = r.date;
+    $("sgEdDir").value = r.dir;
+    $("sgEdDriver").innerHTML = sgDriverOptions(r.driver);
+    $("sgEdDriver").value = r.driver;
+    $("sgEdPas").value = r.passenger;
+    $("sgEdApprove").hidden = r.judge !== "check" && r.judge !== "wait";
+    $("sgEdHist").textContent = r.history ? "直した記録: " + r.history : "";
+    msg("sgEdMsg", "");
+    $("sgEdit").hidden = false;
+    try { $("sgEdit").scrollIntoView({ block: "nearest" }); } catch (e) {}
+  }
+  onAct("sgChecks", { edit: function (b) { openSgEdit(sgData.rows[Number(da(b, "i"))]); } });
+  onAct("sgList", { edit: function (b) { openSgEdit(sgData.rows[Number(da(b, "i"))]); } });
+  function sgEditSend(act) {
+    var r = sgSel;
+    if (!r) return;
+    var by = $("sgEdBy").value.trim(), why = $("sgEdWhy").value.trim();
+    if (!by || !why) { msg("sgEdMsg", "直した人と理由を入力してください", "err"); return; }
+    if (act === "cancel" && !confirm(r.date + " " + r.dir + " " + r.driver + " → " + r.passenger + " の送迎を取り消しますか(行は残り、手当に数えなくなります)")) return;
+    var check = { date: r.date, dir: r.dir, driver: r.driver, passenger: r.passenger, status: r.status, confirm: r.confirm };
+    var change = act === "fix" ? { date: $("sgEdDate").value, dir: $("sgEdDir").value, driver: $("sgEdDriver").value, passenger: $("sgEdPas").value } : {};
+    acall("adminSougeiEdit", r.id, act, check, change, by, why).then(function (res) {
+      $("sgEdit").hidden = true; sgSel = null; $("sgEdWhy").value = "";
+      var m = { fix: "直しました", cancel: "取り消しました", approve: "認めました(手当に数えます)" }[act] +
+        (res.added && res.added.length ? "。送迎対象者に " + res.added.join("・") + " さんを足しました" : "");
+      return loadSougei().then(function () { msg("sgMsg", m, "ok"); });
+    }).catch(function (e) { msg("sgEdMsg", errText(e), "err"); });
+  }
+  $("sgEdSave").addEventListener("click", function () { sgEditSend("fix"); });
+  $("sgEdApprove").addEventListener("click", function () { sgEditSend("approve"); });
+  $("sgEdCancel").addEventListener("click", function () { sgEditSend("cancel"); });
+  $("sgEdClose").addEventListener("click", function () { $("sgEdit").hidden = true; sgSel = null; });
+  $("sgAddOpen").addEventListener("click", function () {
+    if (!sgData) return;
+    $("sgEdit").hidden = true; sgSel = null;
+    $("sgAdDate").value = S.today;
+    $("sgAdDir").value = "行き";
+    $("sgAdDriver").innerHTML = sgDriverOptions("");
+    $("sgAdDriver").value = "";
+    ["sgAdP1", "sgAdP2", "sgAdP3", "sgAdP4"].forEach(function (id) { $(id).value = ""; });
+    msg("sgAdMsg", "");
+    $("sgAdd").hidden = false;
+    try { $("sgAdd").scrollIntoView({ block: "nearest" }); } catch (e) {}
+  });
+  $("sgAdClose").addEventListener("click", function () { $("sgAdd").hidden = true; });
+  $("sgAdSave").addEventListener("click", function () {
+    var by = $("sgAdBy").value.trim(), why = $("sgAdWhy").value.trim();
+    if (!by || !why) { msg("sgAdMsg", "直した人と理由を入力してください", "err"); return; }
+    var add = { date: $("sgAdDate").value, dir: $("sgAdDir").value, driver: $("sgAdDriver").value,
+      passengers: ["sgAdP1", "sgAdP2", "sgAdP3", "sgAdP4"].map(function (id) { return $(id).value; }) };
+    acall("adminSougeiAdd", add, by, why, newReqId()).then(function (res) {
+      $("sgAdd").hidden = true; $("sgAdWhy").value = "";
+      var m = "足しました: " + add.date + " " + add.dir + " " + add.driver + " → " + res.names.join("・") +
+        (res.added && res.added.length ? "(送迎対象者に " + res.added.join("・") + " さんを足しました)" : "");
+      if (add.date.slice(0, 7) !== ($("sgMonth").value || "")) $("sgMonth").value = add.date.slice(0, 7);
+      return loadSougei().then(function () { msg("sgMsg", m, "ok"); });
+    }).catch(function (e) { msg("sgAdMsg", errText(e), "err"); });
+  });
+  function sgTarget(act, name, done) {
+    acall("adminSougeiTarget", act, name).then(function () { return loadSougei().then(function () { msg("sgMsg", done, "ok"); }); })
+      .catch(function (e) { msg("sgMsg", errText(e), "err"); });
+  }
+  onAct("sgNotice", { tseen: function (b) { sgTarget("seen", da(b, "name"), da(b, "name") + " さんを確認しました"); } });
+  onAct("sgTargets", {
+    tremove: function (b) { sgTarget("remove", da(b, "name"), da(b, "name") + " さんを一覧から外しました(端末に出なくなります)"); },
+    trestore: function (b) { sgTarget("restore", da(b, "name"), da(b, "name") + " さんを一覧に戻しました"); }
+  });
+  $("sgTgAdd").addEventListener("click", function () {
+    var n = $("sgTgName").value.trim();
+    if (!n) { msg("sgMsg", "名前を入力してください", "err"); return; }
+    $("sgTgName").value = "";
+    sgTarget("add", n, n + " さんを送迎対象者に足しました");
+  });
+  $("sgCsv").addEventListener("click", function () {
+    if (!sgData || sgData.blocking.length) return;
+    var csv = sgData.csv, filename = "送迎_" + sgData.ym.replace("-", "") + ".csv";
+    try {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      msg("sgMsg", filename + " を保存しました(ブラウザの保存先を確認してください)", "ok");
+    } catch (e) {
+      var ta = $("sgCsvFallback"); ta.value = csv.replace(/^﻿/, ""); ta.hidden = false; ta.select();
+      msg("sgMsg", "この画面ではファイルを保存できません。下の内容をコピーして「" + filename + "」として保存してください", "err");
     }
   });
 
