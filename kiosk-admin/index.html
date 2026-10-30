@@ -102,6 +102,7 @@
       <button type="button" role="tab" data-tab="adv">前渡し</button>
       <button type="button" role="tab" data-tab="yukyu">有給</button>
       <button type="button" role="tab" data-tab="fix">打刻の修正</button>
+      <button type="button" role="tab" data-tab="meal">給食</button>
       <button type="button" role="tab" data-tab="sougei">送迎</button>
       <button type="button" role="tab" data-tab="roster">名簿</button>
       <button type="button" role="tab" data-tab="monthly">月次集計</button>
@@ -295,11 +296,31 @@
       </div>
     </div>
 
+    <!-- 給食の取り消し(2026-10-30) -->
+    <div data-pane="meal" hidden>
+      <div class="card">
+        <div class="topbar"><h2>給食の取り消し</h2><button id="mlReload" type="button">読み直す</button></div>
+        <p class="sub">電話で頼まれた人の、今日の注文を取り消します。注文の行は消さず、取り消した人・時刻をシート「給食」に残します。</p>
+        <p id="mlState" class="note"></p>
+        <div class="grid2">
+          <div><label for="mlBy">取り消す人(必須)</label><input id="mlBy" type="text" maxlength="30"></div>
+          <div><label for="mlWhy">理由(必須)</label><input id="mlWhy" type="text" maxlength="200"></div>
+        </div>
+        <p id="mlMsg" class="msg"></p>
+        <h3>今日の注文</h3>
+        <div id="mlList"></div>
+        <h3>取り消した注文</h3>
+        <div id="mlDone" class="scroll"></div>
+      </div>
+    </div>
+
     <!-- 名簿 -->
     <div data-pane="roster" hidden>
       <div class="card">
         <h2>名簿</h2>
         <p id="codeInfo" class="sub"></p>
+        <label for="rosterNewFactory">工場(追加・登録する人。端末の最初の画面の名前の一覧に出す工場)</label>
+        <select id="rosterNewFactory"><option value="">両方</option><option value="北山">北山</option><option value="厚原">厚原</option></select>
         <h3>追加</h3>
         <div class="grid2">
           <div><label for="rosterNew">名前</label><input id="rosterNew" type="text" maxlength="30"></div>
@@ -444,16 +465,16 @@
   setInterval(checkIdle, 1000);
 
   var CLEAR_HTML = ["pinIssued", "pinList", "pinSummary", "pendingList", "dayOut", "dayPays", "monthOut", "fixTable", "fixHist", "codeInfo", "epsonMatch", "rosterList",
-    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut"];
-  var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "issueName", "csvFallback"];
+    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut", "mlState", "mlList", "mlDone"];
+  var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "rosterNewFactory", "issueName", "csvFallback", "mlBy", "mlWhy"];
   function logout(note) {
     if (token) { try { send("adminLogout", [token], function () {}, function () {}); } catch (e) {} }
     gen++; token = ""; tokenAt = 0; renewing = null; S = null; busyN = 0;
-    lastMonthly = null; adminList = []; fixUi = { list: [], shifts: [], sel: null, by: "", names: [], places: [], shiftDefs: [] }; pinRows = [];
+    lastMonthly = null; adminList = []; fixUi = { list: [], shifts: [], sel: null, by: "", names: [], places: [], shiftDefs: [] }; pinRows = []; mlData = null; flagsBy = "";
     CLEAR_HTML.forEach(function (id) { $(id).innerHTML = ""; });
     CLEAR_VAL.forEach(function (id) { $(id).value = ""; });
     ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
-    ["mainMsg", "pinMsg", "advMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg"].forEach(function (id) { msg(id, ""); });
+    ["mainMsg", "pinMsg", "advMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg", "mlMsg"].forEach(function (id) { msg(id, ""); });
     $("busy").hidden = true; $("vMain").hidden = true; $("logoutBtn").hidden = true; $("vLogin").hidden = false;
     msg("loginMsg", note || "", note ? "err" : "");
     window.scrollTo(0, 0);
@@ -490,6 +511,7 @@
     if (name === "adv") openAdv();
     if (name === "yukyu") openYukyu();
     if (name === "fix") openFix();
+    if (name === "meal") loadMeals();
     if (name === "sougei") openSougei();
     if (name === "roster") openRoster();
     if (name === "monthly") openMonthly();
@@ -859,8 +881,46 @@
     }).catch(function (e) { $("addSave").disabled = false; addMsg(errText(e), "err"); });
   });
 
+  // ---------- 給食の取り消し(2026-10-30。人ごと・今日の注文だけ・大富士へ送る時刻まで。サーバーでも時刻を確かめる) ----------
+  var mlData = null, ML_WHY = "本人から電話";
+  $("mlReload").addEventListener("click", function () { msg("mlMsg", ""); loadMeals(); });
+  function loadMeals() {
+    return acall("adminMealList").then(renderMeals, function (e) { msg("mlMsg", errText(e), "err"); });
+  }
+  function renderMeals(d) {
+    mlData = d;
+    if (!$("mlWhy").value) $("mlWhy").value = ML_WHY;
+    $("mlState").innerHTML = jpDate(d.day) + "の注文。" + (d.closed ? "<b>" + esc(d.until) + " を過ぎたので、もう取り消せません。</b>" : "<b>" + esc(d.until) + " まで</b>取り消せます(大富士へ送る時刻)。") +
+      (d.noCutoff ? "(テスト版は時刻で止めません)" : "");
+    $("mlList").innerHTML = !d.people.length ? '<p class="sub">今日の注文はありません</p>' : d.people.map(function (p) {
+      return '<div class="item"><div class="top"><b>' + esc(p.name) + "</b><span>" + yen(p.yen) + "</span></div>" +
+        '<div class="sub" style="margin:2px 0 0">' + p.rows.map(function (m) { return esc(hm(m.time) + " " + m.menu + (m.size === "追加" ? "" : " " + m.size) + " ×" + m.qty); }).join("<br>") + "</div>" +
+        (d.closed ? "" : '<div class="acts"><button type="button" class="danger" data-act="cancel" data-name="' + esc(p.name) + '">この人の注文を取り消す</button></div>') + "</div>";
+    }).join("");
+    $("mlDone").innerHTML = !d.cancelled.length ? '<p class="sub">ありません</p>' :
+      "<table><thead><tr><th>氏名</th><th>メニュー</th><th>個数</th><th>取消</th><th>取り消した人</th><th>理由</th></tr></thead><tbody>" +
+      d.cancelled.map(function (m) {
+        return '<tr class="cancelled"><td>' + esc(m.name) + "</td><td>" + esc(m.menu) + "</td><td>" + m.qty + "</td><td>" + hm(m.at) + "</td><td>" + esc(m.by) + "</td><td>" + esc(m.why) + "</td></tr>";
+      }).join("") + "</tbody></table>";
+  }
+  onAct("mlList", {
+    cancel: function (b) {
+      var name = da(b, "name"), by = $("mlBy").value.trim(), why = $("mlWhy").value.trim();
+      var p = mlData && mlData.people.filter(function (x) { return x.name === name; })[0];
+      msg("mlMsg", "");
+      if (!p) return;
+      if (!by) { msg("mlMsg", "取り消す人の名前を入力してください", "err"); return; }
+      if (!why) { msg("mlMsg", "理由を入力してください", "err"); return; }
+      if (!confirm(name + " さんの今日の注文(" + yen(p.yen) + ")を取り消しますか？")) return;
+      acall("adminMealCancel", name, { day: mlData.day, rows: p.rows.map(function (m) { return m.row; }) }, by, why, newReqId()).then(function (r) {
+        renderMeals(r.list);
+        msg("mlMsg", name + " さんの注文を取り消しました(" + yen(r.yen) + ")", "ok");
+      }).catch(function (e) { msg("mlMsg", errText(e), "err"); loadMeals(); });
+    }
+  });
+
   // ---------- 名簿(端末の「名簿の管理」と同じ関数。置き場所はここにはない) ----------
-  var rosterUi = { editing: "", deleting: "" }, adminList = [];
+  var rosterUi = { editing: "", deleting: "" }, adminList = [], flagsBy = "";
   function rosterMsg(text, kind) { msg("rosterMsg", text, kind); }
   function epsonBox(html, ng) { var b = $("epsonMatch"); b.innerHTML = html || ""; b.hidden = !html; b.className = "warnbox" + (ng ? " ng" : ""); }
   function openRoster() {
@@ -888,8 +948,20 @@
   function showRosterList(list) { if (Array.isArray(list)) { adminList = list; renderRoster(); return Promise.resolve(); } return loadRoster(); }
   function renderRoster() {
     $("rosterList").innerHTML = !adminList.length ? '<p class="sub">名簿に登録されている方はいません</p>' : adminList.map(function (p) {
-      var name = p.name;
-      var tag = (p.code ? '<span class="badge">' + esc(p.code) + "</span>" : '<span class="badge bad">コード未登録</span>') + (p.added ? ' <span class="badge warn">端末で追加</span>' : "");
+      var name = p.name, hasFactory = p.factory !== undefined;   // サーバーが前の版(工場の列なし)なら工場は出さない
+      var tag = (p.code ? '<span class="badge">' + esc(p.code) + "</span>" : '<span class="badge bad">コード未登録</span>') + (p.added ? ' <span class="badge warn">端末で追加</span>' : "") +
+        (hasFactory ? ' <span class="badge">' + esc(p.factory || "両方") + "</span>" : "") +
+        (p.driver ? ' <span class="badge good">運転手</span>' : "") + (p.special ? ' <span class="badge good">' + esc(p.special) + "</span>" : "") +
+        (p.driverBad || p.specialBad || p.factoryBad ? ' <span class="badge bad">シートの値が読めません: ' + esc([p.driverBad, p.specialBad, p.factoryBad].filter(Boolean).join("・")) + "</span>" : "");
+      if (rosterUi.flags === name) {
+        var opt = function (v, label, cur) { return '<option value="' + esc(v) + '"' + (v === cur ? " selected" : "") + ">" + esc(label) + "</option>"; };
+        return '<div class="item"><div class="top"><b>' + esc(name) + "</b>" + tag + "</div>" +
+          (hasFactory ? '<label for="rsFactory">工場(端末の最初の画面に出す工場)</label><select id="rsFactory">' + opt("", "両方", p.factory) + opt("北山", "北山", p.factory) + opt("厚原", "厚原", p.factory) + "</select>" : "") +
+          '<div class="grid2"><div><label for="rsDriver">運転手</label><select id="rsDriver">' + opt("", "なし", p.driver ? "運転手" : "") + opt("運転手", "あり", p.driver ? "運転手" : "") + "</select></div>" +
+          '<div><label for="rsSpecial">勤務の特例</label><select id="rsSpecial">' + opt("", "なし", p.special) + opt("日勤", "日勤", p.special) + "</select></div></div>" +
+          '<label for="rsBy">変えた人(必須)</label><input id="rsBy" type="text" maxlength="30" value="' + esc(flagsBy) + '">' +
+          '<div class="acts"><button type="button" class="go" data-act="flags-save" data-name="' + esc(name) + '">保存</button><button type="button" data-act="cancel">やめる</button></div></div>';
+      }
       if (rosterUi.editing === name) {
         return '<div class="item"><div class="grid2"><input id="rsEditCode" type="text" inputmode="numeric" maxlength="10" aria-label="従業員コード" placeholder="従業員コード" value="' + esc(p.code || "") + '">' +
           '<input id="rsEditName" type="text" maxlength="30" aria-label="新しい名前" value="' + esc(name) + '"></div>' +
@@ -901,11 +973,32 @@
           '<div class="acts"><button type="button" class="danger-solid" data-act="delete-yes" data-name="' + esc(name) + '">削除する</button><button type="button" data-act="cancel">やめる</button></div></div></div>';
       }
       return '<div class="item"><div class="top"><b>' + esc(name) + "</b>" + tag + '</div><div class="acts"><button type="button" data-act="edit" data-name="' + esc(name) + '">修正</button>' +
+        '<button type="button" data-act="flags" data-name="' + esc(name) + '">工場・運転手・勤務の特例</button>' +
         '<button type="button" class="danger" data-act="delete" data-name="' + esc(name) + '">削除</button></div></div>';
     }).join("");
   }
   onAct("rosterList", {
     edit: function (b) { rosterMsg(""); rosterUi = { editing: da(b, "name"), deleting: "" }; renderRoster(); },
+    flags: function (b) { rosterMsg(""); rosterUi = { editing: "", deleting: "", flags: da(b, "name") }; renderRoster(); },
+    "flags-save": function (b) {
+      var name = da(b, "name"), by = $("rsBy").value.trim();
+      flagsBy = by;
+      if (!by) { rosterMsg("変えた人の名前を入力してください", "err"); return; }
+      var flagArgs = ["adminRosterFlags", name, $("rsDriver").value, $("rsSpecial").value, by, newReqId()], rf = $("rsFactory");
+      // 工場の欄がないとき(サーバーが前の版)は送らない(工場は変えない)。あるときは画面が開いたときの3つの値も送り、サーバーが今の値と比べる
+      var was = adminList.filter(function (p) { return p.name === name; })[0];
+      if (rf) flagArgs.push(rf.value, { driver: was && was.driver ? "運転手" : "", special: (was && was.special) || "", factory: (was && was.factory) || "" });
+      acall.apply(null, flagArgs).then(function (r) {
+        rosterUi = { editing: "", deleting: "" };
+        rosterMsg(name + " さんの" + r.changed.join("・") + "を変えました(端末には数分で出ます)", "ok");
+        return showRosterList(r.roster);
+      }).catch(function (e) {
+        var text = errText(e);
+        // 開いたあとで変わった → 今の値を出して選び直してもらう(欄は開いたまま)
+        if (/読み直してください/.test(text)) return loadRoster().then(function () { rosterMsg(text, "err"); });
+        rosterMsg(text, "err");
+      });
+    },
     "delete": function (b) { rosterMsg(""); rosterUi = { editing: "", deleting: da(b, "name") }; renderRoster(); },
     cancel: function () { rosterMsg(""); epsonBox(""); rosterUi = { editing: "", deleting: "" }; renderRoster(); },
     "delete-yes": function (b) {
@@ -957,7 +1050,7 @@
     "epson-code": function (b) {
       var r = epsonPending, code = da(b, "code");
       if (!r) return;
-      acall("adminRosterSave", "", r.name, code).then(function (list) {
+      acall("adminRosterSave", "", r.name, code, false, $("rosterNewFactory").value).then(function (list) {
         epsonBox(""); $("rosterNew").value = ""; $("rosterNewCode").value = ""; $("issueName").value = "";
         rosterMsg(r.name + " さんを、エプソンの従業員コード " + code + " で追加しました", "ok"); return showRosterList(list);
       }).catch(function (e) { epsonBox(""); rosterMsg(errText(e), "err"); });
@@ -966,7 +1059,7 @@
     "edit-no": function () { epsonBox(""); rosterMsg(""); }
   });
   function rosterAdd(nn, cc) {
-    acall("adminRosterSave", "", nn, cc).then(function (list) {
+    acall("adminRosterSave", "", nn, cc, false, $("rosterNewFactory").value).then(function (list) {
       $("rosterNew").value = ""; $("rosterNewCode").value = "";
       rosterMsg(nn + " さんを追加しました", "ok"); return showRosterList(list);
     }).catch(function (e) { rosterMsg(errText(e), "err"); });
@@ -983,7 +1076,7 @@
     rosterMsg("");
     if (!nn) { rosterMsg("名前を入力してください", "err"); return; }
     epsonCheck(nn, "issue", function () {
-      acall("adminIssueCode", nn).then(function (r) {
+      acall("adminIssueCode", nn, $("rosterNewFactory").value).then(function (r) {
         $("issueName").value = "";
         renderCodeInfo(r.info);
         rosterMsg(nn + " さんを登録しました。従業員コードは " + r.code + " です(エプソンへの登録は給与ソフトのあるPCで)", "ok");
@@ -1227,6 +1320,7 @@
           total += m.price;
           return "<tr><td>" + esc(m.name) + "</td><td>" + hm(m.time) + "</td><td>" + esc(m.menu) + "</td><td>" + esc(m.size) + "</td><td>" + m.qty + "</td><td>" + yen(m.price) + "</td><td>" + esc(m.place) + "</td></tr>";
         }).join("") + '<tr class="total"><td colspan="5">合計</td><td>' + yen(total) + "</td><td></td></tr></tbody></table>";
+      if (t.mealCancelled) $("mealTable").innerHTML += '<p class="sub">取り消した注文 ' + t.mealCancelled + "件は入れていません(「給食」タブに出ます)</p>";
     }, function (e) { msg("mainMsg", errText(e), "err"); });
   }
 })();
