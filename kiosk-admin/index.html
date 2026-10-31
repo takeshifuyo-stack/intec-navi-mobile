@@ -300,7 +300,7 @@
     <div data-pane="meal" hidden>
       <div class="card">
         <div class="topbar"><h2>給食の取り消し</h2><button id="mlReload" type="button">読み直す</button></div>
-        <p class="sub">電話で頼まれた人の、今日の注文を取り消します。注文の行は消さず、取り消した人・時刻をシート「給食」に残します。</p>
+        <p class="sub">電話で頼まれた人の、今日の注文と先の予約を取り消します。注文の行は消さず、取り消した人・時刻をシート「給食」に残します。</p>
         <p id="mlState" class="note"></p>
         <div class="grid2">
           <div><label for="mlBy">取り消す人(必須)</label><input id="mlBy" type="text" maxlength="30"></div>
@@ -309,6 +309,9 @@
         <p id="mlMsg" class="msg"></p>
         <h3>今日の注文</h3>
         <div id="mlList"></div>
+        <h3>先の予約(日ごと)</h3>
+        <p id="mlOff" class="warnbox ng" hidden></p>
+        <div id="mlAhead"></div>
         <h3>取り消した注文</h3>
         <div id="mlDone" class="scroll"></div>
       </div>
@@ -341,10 +344,12 @@
     <div data-pane="monthly" hidden>
       <div class="card">
         <h2>月次集計(給与用)</h2>
+        <p class="sub">給食個数・給食代は届く日の月で数えます(前の月に予約した分も、届く月の給食費です)。</p>
         <label for="mPick">対象月</label><input id="mPick" type="month">
         <p id="monthlyToday" class="warnbox" hidden></p>
         <div id="monthlyWarn" class="warnbox" hidden></div>
         <div id="monthlyTable" class="scroll"></div>
+        <p id="monthlyOpenNote" class="warnbox ng" hidden></p>
         <button id="monthlyCsv" class="primary" type="button" disabled>CSV を保存</button>
         <p id="monthlyMsg" class="msg"></p>
         <textarea id="csvFallback" hidden></textarea>
@@ -465,7 +470,7 @@
   setInterval(checkIdle, 1000);
 
   var CLEAR_HTML = ["pinIssued", "pinList", "pinSummary", "pendingList", "dayOut", "dayPays", "monthOut", "fixTable", "fixHist", "codeInfo", "epsonMatch", "rosterList",
-    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut", "mlState", "mlList", "mlDone"];
+    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut", "mlState", "mlList", "mlAhead", "mlDone"];
   var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "rosterNewFactory", "issueName", "csvFallback", "mlBy", "mlWhy"];
   function logout(note) {
     if (token) { try { send("adminLogout", [token], function () {}, function () {}); } catch (e) {} }
@@ -473,7 +478,7 @@
     lastMonthly = null; adminList = []; fixUi = { list: [], shifts: [], sel: null, by: "", names: [], places: [], shiftDefs: [] }; pinRows = []; mlData = null; flagsBy = "";
     CLEAR_HTML.forEach(function (id) { $(id).innerHTML = ""; });
     CLEAR_VAL.forEach(function (id) { $(id).value = ""; });
-    ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
+    ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "monthlyOpenNote", "mlOff", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
     ["mainMsg", "pinMsg", "advMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg", "mlMsg"].forEach(function (id) { msg(id, ""); });
     $("busy").hidden = true; $("vMain").hidden = true; $("logoutBtn").hidden = true; $("vLogin").hidden = false;
     msg("loginMsg", note || "", note ? "err" : "");
@@ -892,32 +897,45 @@
     if (!$("mlWhy").value) $("mlWhy").value = ML_WHY;
     $("mlState").innerHTML = jpDate(d.day) + "の注文。" + (d.closed ? "<b>" + esc(d.until) + " を過ぎたので、もう取り消せません。</b>" : "<b>" + esc(d.until) + " まで</b>取り消せます(大富士へ送る時刻)。") +
       (d.noCutoff ? "(テスト版は時刻で止めません)" : "");
-    $("mlList").innerHTML = !d.people.length ? '<p class="sub">今日の注文はありません</p>' : d.people.map(function (p) {
+    // 人ごとの行(今日の分と先の予約で同じ形)。day = 今日なら空(今までの一覧)、先の日ならボタンに日を入れる
+    function personHtml(p, day, noBtn) {
       return '<div class="item"><div class="top"><b>' + esc(p.name) + "</b><span>" + yen(p.yen) + "</span></div>" +
-        '<div class="sub" style="margin:2px 0 0">' + p.rows.map(function (m) { return esc(hm(m.time) + " " + m.menu + (m.size === "追加" ? "" : " " + m.size) + " ×" + m.qty); }).join("<br>") + "</div>" +
-        (d.closed ? "" : '<div class="acts"><button type="button" class="danger" data-act="cancel" data-name="' + esc(p.name) + '">この人の注文を取り消す</button></div>') + "</div>";
+        '<div class="sub" style="margin:2px 0 0">' + p.rows.map(function (m) { return esc(hm(m.time) + " " + m.deliv + " " + m.menu + (m.size === "追加" ? "" : " " + m.size) + " ×" + m.qty); }).join("<br>") + "</div>" +
+        (noBtn ? "" : '<div class="acts"><button type="button" class="danger" data-act="cancel" data-name="' + esc(p.name) + '" data-day="' + esc(day) + '">この人の注文を取り消す</button></div>') + "</div>";
+    }
+    $("mlList").innerHTML = !d.people.length ? '<p class="sub">今日の注文はありません</p>' : d.people.map(function (p) { return personHtml(p, d.day, d.closed); }).join("");
+    // 休みの日を足す前に入った予約は自動で消さない(発注しないなら、ここで人ごとに取り消す)
+    $("mlOff").hidden = !d.offNote;
+    $("mlOff").textContent = d.offNote ? d.offNote + "。発注しないなら取り消してください" : "";
+    var ahead = (d.ahead || []).filter(function (x) { return x.people.length; });
+    $("mlAhead").innerHTML = !ahead.length ? '<p class="sub">先の予約はありません</p>' : ahead.map(function (x) {
+      return "<h4>" + esc(x.text) + " " + x.people.length + "人" + (x.off ? "(大富士の休み)" : "") + "</h4>" + x.people.map(function (p) { return personHtml(p, x.day, false); }).join("");
     }).join("");
-    $("mlDone").innerHTML = !d.cancelled.length ? '<p class="sub">ありません</p>' :
-      "<table><thead><tr><th>氏名</th><th>メニュー</th><th>個数</th><th>取消</th><th>取り消した人</th><th>理由</th></tr></thead><tbody>" +
-      d.cancelled.map(function (m) {
-        return '<tr class="cancelled"><td>' + esc(m.name) + "</td><td>" + esc(m.menu) + "</td><td>" + m.qty + "</td><td>" + hm(m.at) + "</td><td>" + esc(m.by) + "</td><td>" + esc(m.why) + "</td></tr>";
+    var done = d.cancelled.slice();
+    (d.ahead || []).forEach(function (x) { done = done.concat(x.cancelled.map(function (m) { return Object.assign({ day: x.text }, m); })); });
+    $("mlDone").innerHTML = !done.length ? '<p class="sub">ありません</p>' :
+      "<table><thead><tr><th>氏名</th><th>届く日</th><th>メニュー</th><th>個数</th><th>取消</th><th>取り消した人</th><th>理由</th></tr></thead><tbody>" +
+      done.map(function (m) {
+        return '<tr class="cancelled"><td>' + esc(m.name) + "</td><td>" + esc(m.day || "今日") + "</td><td>" + esc(m.menu) + "</td><td>" + m.qty + "</td><td>" + hm(m.at) + "</td><td>" + esc(m.by) + "</td><td>" + esc(m.why) + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
-  onAct("mlList", {
-    cancel: function (b) {
-      var name = da(b, "name"), by = $("mlBy").value.trim(), why = $("mlWhy").value.trim();
-      var p = mlData && mlData.people.filter(function (x) { return x.name === name; })[0];
-      msg("mlMsg", "");
-      if (!p) return;
-      if (!by) { msg("mlMsg", "取り消す人の名前を入力してください", "err"); return; }
-      if (!why) { msg("mlMsg", "理由を入力してください", "err"); return; }
-      if (!confirm(name + " さんの今日の注文(" + yen(p.yen) + ")を取り消しますか？")) return;
-      acall("adminMealCancel", name, { day: mlData.day, rows: p.rows.map(function (m) { return m.row; }) }, by, why, newReqId()).then(function (r) {
-        renderMeals(r.list);
-        msg("mlMsg", name + " さんの注文を取り消しました(" + yen(r.yen) + ")", "ok");
-      }).catch(function (e) { msg("mlMsg", errText(e), "err"); loadMeals(); });
-    }
-  });
+  function mealCancelAct(b) {
+    var name = da(b, "name"), day = da(b, "day") || mlData.day, by = $("mlBy").value.trim(), why = $("mlWhy").value.trim();
+    var isToday = day === mlData.day, sec = isToday ? mlData : (mlData.ahead || []).filter(function (x) { return x.day === day; })[0];
+    var p = sec && sec.people.filter(function (x) { return x.name === name; })[0];
+    msg("mlMsg", "");
+    if (!p) return;
+    if (!by) { msg("mlMsg", "取り消す人の名前を入力してください", "err"); return; }
+    if (!why) { msg("mlMsg", "理由を入力してください", "err"); return; }
+    if (!confirm(name + " さんの" + (isToday ? "今日" : sec.text) + "の注文(" + yen(p.yen) + ")を取り消しますか？")) return;
+    acall("adminMealCancel", name, { day: day, rows: p.rows.map(function (m) { return m.row; }) }, by, why, newReqId()).then(function (r) {
+      renderMeals(r.list);
+      if (r.partial) msg("mlMsg", name + " さんの注文は一部だけ取り消しました(残り " + r.left + "行)。もう一度押すと残りを取り消します", "err");
+      else msg("mlMsg", name + " さんの注文を取り消しました(" + yen(r.yen) + ")", "ok");
+    }).catch(function (e) { msg("mlMsg", errText(e), "err"); loadMeals(); });
+  }
+  onAct("mlList", { cancel: mealCancelAct });
+  onAct("mlAhead", { cancel: mealCancelAct });
 
   // ---------- 名簿(端末の「名簿の管理」と同じ関数。置き場所はここにはない) ----------
   var rosterUi = { editing: "", deleting: "" }, adminList = [], flagsBy = "";
@@ -1103,6 +1121,9 @@
       lastMonthly = { ym: ym, data: s };
       $("monthlyWarn").hidden = !s.warns.length;
       $("monthlyWarn").innerHTML = "確認してください<ul>" + s.warns.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul>";
+      // まだ締めていない月: CSV には先の予約も入るので、ボタンのすぐ上に出す(2026-11-01)
+      $("monthlyOpenNote").hidden = !s.notClosed;
+      $("monthlyOpenNote").textContent = s.notClosed ? "この月はまだ締めていません。CSV は月が締まってから保存してください" + (s.aheadMeals ? "(これから届く予約 " + s.aheadMeals + "個 が給食に入っています)" : "") : "";
       var H = ["normal", "night", "ot", "nightOt"];
       var tot = { days: 0, mealQty: 0, mealYen: 0, leave: 0, normal: 0, night: 0, ot: 0, nightOt: 0 };
       s.rows.forEach(function (p) { tot.days += p.days; tot.mealQty += p.mealQty; tot.mealYen += p.mealYen; tot.leave += p.leave; H.forEach(function (k) { tot[k] += Number(p[k]); }); });
@@ -1315,11 +1336,11 @@
         }).join("") + "</tbody></table>";
       var total = 0;
       $("mealTable").innerHTML = !t.meals.length ? '<p class="sub">本日の給食の注文はまだありません</p>' :
-        "<table><thead><tr><th>氏名</th><th>時刻</th><th>メニュー</th><th>サイズ</th><th>個数</th><th>金額</th><th>設置場所</th></tr></thead><tbody>" +
+        "<table><thead><tr><th>氏名</th><th>時刻</th><th>配送</th><th>メニュー</th><th>サイズ</th><th>個数</th><th>金額</th><th>設置場所</th></tr></thead><tbody>" +
         t.meals.map(function (m) {
           total += m.price;
-          return "<tr><td>" + esc(m.name) + "</td><td>" + hm(m.time) + "</td><td>" + esc(m.menu) + "</td><td>" + esc(m.size) + "</td><td>" + m.qty + "</td><td>" + yen(m.price) + "</td><td>" + esc(m.place) + "</td></tr>";
-        }).join("") + '<tr class="total"><td colspan="5">合計</td><td>' + yen(total) + "</td><td></td></tr></tbody></table>";
+          return "<tr><td>" + esc(m.name) + "</td><td>" + hm(m.time) + "</td><td>" + esc(m.deliv) + "</td><td>" + esc(m.menu) + "</td><td>" + esc(m.size) + "</td><td>" + m.qty + "</td><td>" + yen(m.price) + "</td><td>" + esc(m.place) + "</td></tr>";
+        }).join("") + '<tr class="total"><td colspan="6">合計</td><td>' + yen(total) + "</td><td></td></tr></tbody></table>";
       if (t.mealCancelled) $("mealTable").innerHTML += '<p class="sub">取り消した注文 ' + t.mealCancelled + "件は入れていません(「給食」タブに出ます)</p>";
     }, function (e) { msg("mainMsg", errText(e), "err"); });
   }
