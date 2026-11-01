@@ -914,9 +914,9 @@
     var done = d.cancelled.slice();
     (d.ahead || []).forEach(function (x) { done = done.concat(x.cancelled.map(function (m) { return Object.assign({ day: x.text }, m); })); });
     $("mlDone").innerHTML = !done.length ? '<p class="sub">ありません</p>' :
-      "<table><thead><tr><th>氏名</th><th>届く日</th><th>メニュー</th><th>個数</th><th>取消</th><th>取り消した人</th><th>理由</th></tr></thead><tbody>" +
+      "<table><thead><tr><th>氏名</th><th>届く日</th><th>配送</th><th>メニュー</th><th>個数</th><th>取消</th><th>取り消した人</th><th>理由</th></tr></thead><tbody>" +
       done.map(function (m) {
-        return '<tr class="cancelled"><td>' + esc(m.name) + "</td><td>" + esc(m.day || "今日") + "</td><td>" + esc(m.menu) + "</td><td>" + m.qty + "</td><td>" + hm(m.at) + "</td><td>" + esc(m.by) + "</td><td>" + esc(m.why) + "</td></tr>";
+        return '<tr class="cancelled"><td>' + esc(m.name) + "</td><td>" + esc(m.day || "今日") + "</td><td>" + esc(m.deliv) + "</td><td>" + esc(m.menu) + "</td><td>" + m.qty + "</td><td>" + hm(m.at) + "</td><td>" + esc(m.by) + "</td><td>" + esc(m.why) + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
   function mealCancelAct(b) {
