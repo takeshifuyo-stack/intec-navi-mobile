@@ -75,6 +75,7 @@
   .testmark { background: #c62828; color: #fff; font-weight: 700; text-align: center; border-radius: 8px; padding: 4px; margin-bottom: 6px; }
   .topbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   textarea { width: 100%; min-height: 120px; font: 13px monospace; }
+  textarea.notice-text { min-height: 84px; font: 16px/1.5 system-ui, -apple-system, "Hiragino Sans", "Yu Gothic UI", sans-serif; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); margin-bottom: 6px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -107,6 +108,7 @@
       <button type="button" role="tab" data-tab="roster">名簿</button>
       <button type="button" role="tab" data-tab="monthly">月次集計</button>
       <button type="button" role="tab" data-tab="today">本日の記録</button>
+      <button type="button" role="tab" data-tab="notice">お知らせ</button>
     </div>
     <p id="mainMsg" class="msg"></p>
 
@@ -129,6 +131,14 @@
 
     <!-- 前渡し -->
     <div data-pane="adv" hidden>
+      <!-- 前渡金の振込(2026-11-12 Takeshi。docs/maewatashi.md「前渡金の振込を管理者専用ページから始める」) -->
+      <div class="card" id="trCard">
+        <div class="topbar"><h2>前渡金の振込</h2><button id="trReload" type="button">読み直す</button></div>
+        <p class="sub">銀行(しみず法人ダイレクト)での手続きは、支払日の3営業日前の午前中です(本人の振込の申請は、その前の日 = 支払日の4営業日前の日の終わりまで)。会社と事務員の都合で、手続きの日より前でも後でも押せます。押したあとは、その支払日の本人の振込の申請は受け付けません(手渡しは受け付けます。「止めた」にすると受け付けに戻ります)。「前渡金の振込手続きを開始」を押すと、会社の PC が前渡金.xls から振込のファイルを作り、銀行で QR の手前まで進めます。最後の QR(トークン)の承認だけは人が行います。</p>
+        <label for="trBy">押した人(お名前)</label><input id="trBy" type="text" maxlength="20" autocomplete="off">
+        <p id="trMsg" class="msg"></p>
+        <div id="trList"></div>
+      </div>
       <div class="card">
         <div class="subtabs">
           <button type="button" data-adv="pending">申請中</button>
@@ -364,6 +374,25 @@
         <h3>給食</h3><div id="mealTable" class="scroll"></div>
       </div>
     </div>
+
+    <!-- 端末のお知らせ(2026-11-03。docs/kintai-app.md「新しい画面の自動の読み直しと端末のお知らせ」) -->
+    <div data-pane="notice" hidden>
+      <div class="card">
+        <div class="topbar"><h2>端末のお知らせ</h2><button id="ntReload" type="button">読み直す</button></div>
+        <p class="sub">出退勤の端末の最初の画面(名前の上)に出す短いお知らせ。1つ3行・120文字まで。空にして保存すると消えます。保存すると1分ほどで端末に出ます。工場の欄は、その工場の iPad だけに共通の下に出ます。氏名・暗証番号などは書かないでください。</p>
+        <label for="ntAll">共通(北山・厚原の両方)</label>
+        <textarea id="ntAll" class="notice-text" maxlength="200"></textarea>
+        <button class="go" type="button" data-nt="all">共通を保存</button>
+        <label for="ntKita">北山の iPad だけ</label>
+        <textarea id="ntKita" class="notice-text" maxlength="200"></textarea>
+        <button class="go" type="button" data-nt="北山">北山を保存</button>
+        <label for="ntAtsu">厚原の iPad だけ</label>
+        <textarea id="ntAtsu" class="notice-text" maxlength="200"></textarea>
+        <button class="go" type="button" data-nt="厚原">厚原を保存</button>
+        <p id="ntMsg" class="msg"></p>
+        <p id="ntVer" class="sub" style="margin-top:12px"></p>
+      </div>
+    </div>
   </section>
 </main>
 <div id="busy" class="busy" hidden>通信中…</div>
@@ -470,8 +499,9 @@
   setInterval(checkIdle, 1000);
 
   var CLEAR_HTML = ["pinIssued", "pinList", "pinSummary", "pendingList", "dayOut", "dayPays", "monthOut", "fixTable", "fixHist", "codeInfo", "epsonMatch", "rosterList",
-    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut", "mlState", "mlList", "mlAhead", "mlDone"];
-  var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "rosterNewFactory", "issueName", "csvFallback", "mlBy", "mlWhy"];
+    "monthlyWarn", "monthlyTable", "logTable", "mealTable", "ykPending", "ykMonthOut", "mlState", "mlList", "mlAhead", "mlDone", "ntVer", "trList"];
+  var CLEAR_VAL = ["adminPw", "pinSearch", "pxAmount", "pxMemo", "fixBy", "fixWhy", "addBy", "addWhy", "rosterNew", "rosterNewCode", "rosterNewFactory", "issueName", "csvFallback", "mlBy", "mlWhy",
+    "ntAll", "ntKita", "ntAtsu", "trBy"];
   function logout(note) {
     if (token) { try { send("adminLogout", [token], function () {}, function () {}); } catch (e) {} }
     gen++; token = ""; tokenAt = 0; renewing = null; S = null; busyN = 0;
@@ -479,7 +509,8 @@
     CLEAR_HTML.forEach(function (id) { $(id).innerHTML = ""; });
     CLEAR_VAL.forEach(function (id) { $(id).value = ""; });
     ["pinIssued", "fixEdit", "addEdit", "fixCancelBox", "epsonMatch", "monthlyWarn", "monthlyOpenNote", "mlOff", "csvFallback", "idleWarn"].forEach(function (id) { $(id).hidden = true; });
-    ["mainMsg", "pinMsg", "advMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg", "mlMsg"].forEach(function (id) { msg(id, ""); });
+    trData = null;
+    ["mainMsg", "pinMsg", "advMsg", "trMsg", "ykMsg", "fixMsg", "fixEditMsg", "addMsg", "rosterMsg", "monthlyMsg", "mlMsg", "ntMsg"].forEach(function (id) { msg(id, ""); });
     $("busy").hidden = true; $("vMain").hidden = true; $("logoutBtn").hidden = true; $("vLogin").hidden = false;
     msg("loginMsg", note || "", note ? "err" : "");
     window.scrollTo(0, 0);
@@ -521,6 +552,7 @@
     if (name === "roster") openRoster();
     if (name === "monthly") openMonthly();
     if (name === "today") loadToday();
+    if (name === "notice") loadNotice();
   }
   // 一覧の中のボタンは、入れ物でまとめて受ける(data-act)
   function onAct(id, handlers) {
@@ -597,9 +629,13 @@
     if (!$("dayPick").value) $("dayPick").value = pays[0] || S.today;
     if (!$("advMonth").value) $("advMonth").value = S.today.slice(0, 7);
     if (!$("pxDate").value) $("pxDate").value = S.today;
-    $("dayPays").textContent = pays.length ? "これからの支払日: " + pays.map(jpDate).join("・") + "(土日・祝日・年末年始に当たる回は前の平日に早めています)" : "";
+    // 振込の締め切り(支払日の4営業日前。2026-11-02 は3、11-12 から4)も出す。古いサーバーで transferUntil がなければ日付だけ
+    var until = S.transferUntil || {};
+    $("dayPays").textContent = pays.length ? "これからの支払日: " + pays.map(function (d) { return jpDate(d) + (until[d] ? "(振込の締め切り " + jpDate(until[d]) + ")" : ""); }).join("・") +
+      "。土日・祝日に当たる回は次の平日、年末年始にかかる回は前の平日に動かしています" : "";
     $("pxName").innerHTML = '<option value="">選んでください</option>' + S.names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + "</option>"; }).join("");
     $("pxMethod").innerHTML = '<option value="">選んでください</option>' + S.methods.map(function (m) { return '<option value="' + esc(m) + '">' + esc(m) + "</option>"; }).join("");
+    loadTransfer();
     advTab(advCur);
   }
   function advTab(name) {
@@ -686,6 +722,89 @@
       msg("advMsg", name + " さん " + jpDate(date) + " " + yen(amount) + " " + method + " を記録しました" + (r.over ? "(上限超え)" : ""), "ok");
       $("pxAmount").value = ""; $("pxMemo").value = "";
     }).catch(advErr);
+  });
+
+  // ---------- 前渡金の振込(2026-11-12。adminTransferInfo・adminTransferStart・adminTransferStop) ----------
+  // 押すとシート「振込依頼」に1行(依頼中)。会社の PC が読んで、前渡金.xls から振込のファイルを作り、ハンズが銀行で QR の手前まで進める。
+  // PC が書き戻した状態(受付 → QR待ち → 済み / 止めた)とメモ(例「給与 11件 160,000円・総合 4件 57,800円」)をここに出す
+  var trData = null;
+  function trErr(e) { msg("trMsg", errText(e), "err"); }
+  function trStatusText(t) {
+    var memo = t.memo || "";
+    if (t.status === "依頼中") return "依頼中: 会社の PC が受け付けるのを待っています(" + t.at.slice(0, 16) + " " + t.by + " さんが依頼)";
+    if (t.status === "受付") return "受付: 会社の PC が振込のファイルを作り、銀行で手続きを進めています" + (memo ? "(" + memo + ")" : "");
+    if (t.status === "QR待ち") {
+      // 総合振込 → 給与振込 の順に流し、QR を2回続けて読む(Takeshi 11/12)。PC はメモの先頭に「1/2 総合」「2/2 給与」を書く
+      var q = trQrStep(memo);
+      if (q) return "QR " + q.step + "(" + q.kind + "振込)を待っています。FuyoメインPC の法人ダイレクトの画面で QR を読み、番号を入れて確定してください" + (q.rest ? "(" + q.rest + ")" : "");
+      return "QR待ち: " + (memo || "銀行で QR の手前まで進めました") + "。FuyoメインPC の法人ダイレクトの画面で QR を読み、番号を入れて確定してください";
+    }
+    if (t.status === "済み") return "済み: " + (memo || "確定しました") + "(" + t.updated.slice(0, 16) + ")";
+    if (t.status === "止めた") return "止めた: " + (memo || "") + "(" + t.updated.slice(0, 16) + ")";
+    return t.status + (memo ? ": " + memo : "");
+  }
+  /** メモの先頭の「1/2 総合 …」「2/2 給与 …」→ { step: "1/2", kind: "総合", rest: "4件 57,800円" }(なければ null) */
+  function trQrStep(memo) {
+    var m = String(memo || "").match(/^\s*(\d)\s*\/\s*(\d)\s*(総合|給与)(?:振込)?\s*(.*)$/);
+    return m ? { step: m[1] + "/" + m[2], kind: m[3], rest: m[4].trim() } : null;
+  }
+  var TR_BOX = { "依頼中": "note", "受付": "note", "QR待ち": "warnbox", "済み": "note", "止めた": "warnbox ng" };
+  function trStatusHtml(t) {
+    var q = t.status === "QR待ち" ? trQrStep(t.memo) : null;
+    // QR待ちは大きく出す(遠藤さんが離れた所からでも、何回目の QR かが分かるように)
+    var big = t.status === "QR待ち" ? "font-size:20px;font-weight:700;line-height:1.5;" : "";
+    return '<div class="' + (TR_BOX[t.status] || "note") + '" style="margin-top:6px;' + big + '" data-trstatus="' + esc(t.status) + '"' + (q ? ' data-qrstep="' + esc(q.step) + '"' : "") + ">" +
+      esc(trStatusText(t)) + "</div>";
+  }
+  function loadTransfer() {
+    return acall("adminTransferInfo").then(function (d) { trData = d; renderTransfer(); }, trErr);
+  }
+  $("trReload").addEventListener("click", function () { msg("trMsg", ""); loadTransfer(); });
+  function renderTransfer() {
+    var d = trData; if (!d) return;
+    var html = d.pays.map(function (p) {
+      var late = d.today > p.bankDue, isToday = d.today === p.bankDue;
+      return '<div class="item"><div class="top"><b>支払日 ' + esc(jpDate(p.date)) + "</b><span>銀行での手続き " + esc(jpDate(p.bankDue)) + " 午前中" +
+        (isToday ? ' <span class="badge warn">今日</span>' : late ? ' <span class="badge bad">過ぎています</span>' : "") + "</span></div>" +
+        '<div class="sub" style="margin:2px 0 0">端末で承認済みの振込: ' + p.people + "人 合計 " + esc(yen(p.total)) + (p.count !== p.people ? "(" + p.count + "件)" : "") +
+        "。LINE・電話の分は前渡金.xls から入ります" + (p.until ? "。本人の振込の申請は " + esc(jpDate(p.until)) + " まで" : "") + (p.noTable ? "・祝日の表がない年です(祝日に当たっていないか確かめてください)" : "") + "</div>" +
+        (p.open ? trStatusHtml(p.open) : p.latest ? trStatusHtml(p.latest) : "") +
+        '<div class="acts">' + (p.open
+          ? '<button type="button" class="danger" data-act="stop" data-id="' + esc(p.open.id) + '">この依頼を止める</button>'
+          : '<button type="button" class="go" data-act="start" data-date="' + esc(p.date) + '">前渡金の振込手続きを開始</button>') + "</div></div>";
+    }).join("");
+    if (d.others.length) {
+      html += "<h3>ほかの支払日の終わっていない依頼</h3>" + d.others.map(function (t) {
+        return '<div class="item"><div class="top"><b>支払日 ' + esc(jpDate(t.date)) + "</b><span>銀行での手続き " + esc(jpDate(t.bankDue)) + " 午前中</span></div>" + trStatusHtml(t) +
+          '<div class="acts"><button type="button" class="danger" data-act="stop" data-id="' + esc(t.id) + '">この依頼を止める</button></div></div>';
+      }).join("");
+    }
+    $("trList").innerHTML = html || '<p class="sub">支払日が見つかりません</p>';
+  }
+  onAct("trList", {
+    start: function (b) {
+      var date = da(b, "date"), p = (trData && trData.pays || []).filter(function (x) { return x.date === date; })[0];
+      if (!p) return;
+      var by = $("trBy").value.trim();
+      if (!by) { msg("trMsg", "押した人のお名前を入れてください", "err"); return; }
+      var warn = (trData.today > p.bankDue ? "\n\n※ 銀行での手続きの日(" + jpDate(p.bankDue) + " 午前中)を過ぎています。支払日に間に合わないことがあります" : "") +
+        (p.done ? "\n\n※ この支払日はすでに「済み」の依頼があります。追加の分だけを振り込むときに押してください" : "");
+      if (!confirm("前渡金の振込手続きを開始しますか？\n\n支払日: " + jpDate(p.date) + "\n銀行での手続き: " + jpDate(p.bankDue) + " 午前中\n端末で承認済みの振込: " + p.people + "人 合計 " + yen(p.total) +
+        "\nLINE・電話の分は前渡金.xls から入ります。\n押したあとは、この支払日の本人の振込の申請は受け付けません(手渡しは受け付けます)。\n\nOK を押すと会社の PC が銀行で QR の手前まで進めます。最後の QR の承認は人が行います。" + warn)) return;
+      msg("trMsg", "");
+      acall("adminTransferStart", date, by, newReqId()).then(function () {
+        msg("trMsg", jpDate(date) + " 支払いの振込手続きを依頼しました。会社の PC が受け付けると、ここに状態が出ます(「読み直す」で更新)", "ok");
+        return loadTransfer();
+      }).catch(function (e) { trErr(e); loadTransfer(); });
+    },
+    stop: function (b) {
+      var by = $("trBy").value.trim();
+      if (!by) { msg("trMsg", "止める人のお名前を「押した人」の欄に入れてください", "err"); return; }
+      var why = prompt("この依頼を止めますか？ 止める理由(空でも可)\n銀行の画面で進めた分は止まりません。法人ダイレクトで QR の承認をしなければ振り込まれません", "");
+      if (why === null) return;
+      acall("adminTransferStop", da(b, "id"), by, why).then(function () { msg("trMsg", "依頼を止めました", "ok"); return loadTransfer(); })
+        .catch(function (e) { trErr(e); loadTransfer(); });
+    }
   });
 
   // ---------- 有給申請(2026-10-29。adminYukyuList・adminYukyuDecide・adminYukyuVoid) ----------
@@ -1344,6 +1463,29 @@
       if (t.mealCancelled) $("mealTable").innerHTML += '<p class="sub">取り消した注文 ' + t.mealCancelled + "件は入れていません(「給食」タブに出ます)</p>";
     }, function (e) { msg("mainMsg", errText(e), "err"); });
   }
+
+  // ---------- 端末のお知らせ(2026-11-03): adminNotice(読む)/ adminNoticeSave(1つずつ保存。空なら消す)。どれも最初に requireAdmin_ ----------
+  var NT_FIELDS = { all: "ntAll", "北山": "ntKita", "厚原": "ntAtsu" };
+  // only: 保存した欄だけ書き直す(ほかの欄の書きかけを消さない)
+  function showNotice(r, only) {
+    Object.keys(NT_FIELDS).forEach(function (k) { if (!only || only === k) $(NT_FIELDS[k]).value = (r.notice && r.notice[k]) || ""; });
+    $("ntVer").textContent = "端末の画面の版: " + r.screenVer + (r.verProp ? "(スクリプトプロパティ KIOSK_SCREEN_VER = " + r.verProp + ")" : "") +
+      " / 新しい版への読み直し: " + r.how + (r.test ? "(テスト版)" : "");
+  }
+  function loadNotice() {
+    msg("ntMsg", "");
+    return acall("adminNotice").then(function (r) { showNotice(r); }, function (e) { msg("ntMsg", errText(e), "err"); });
+  }
+  $("ntReload").addEventListener("click", loadNotice);
+  document.querySelectorAll("[data-nt]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var k = b.getAttribute("data-nt"), label = k === "all" ? "共通" : k;
+      acall("adminNoticeSave", k, $(NT_FIELDS[k]).value).then(function (r) {
+        showNotice(r, k);
+        msg("ntMsg", label + "のお知らせを" + (r.notice && r.notice[k] ? "保存しました" : "消しました") + "。1分ほどで端末に出ます", "ok");
+      }, function (e) { msg("ntMsg", errText(e), "err"); });
+    });
+  });
 })();
 </script>
 </body>
