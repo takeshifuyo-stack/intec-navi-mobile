@@ -134,7 +134,7 @@
       <!-- 前渡金の振込(2026-11-12 Takeshi。docs/maewatashi.md「前渡金の振込を管理者専用ページから始める」) -->
       <div class="card" id="trCard">
         <div class="topbar"><h2>前渡金の振込</h2><button id="trReload" type="button">読み直す</button></div>
-        <p class="sub">銀行(しみず法人ダイレクト)での手続きは、支払日の3営業日前の午前中です(本人の振込の申請は、その前の日 = 支払日の4営業日前の日の終わりまで)。会社と事務員の都合で、手続きの日より前でも後でも押せます。押したあとは、その支払日の本人の振込の申請は受け付けません(手渡しは受け付けます。「止めた」にすると受け付けに戻ります)。「前渡金の振込手続きを開始」を押すと、会社の PC が前渡金.xls から振込のファイルを作り、銀行で QR の手前まで進めます。最後の QR(トークン)の承認だけは人が行います。</p>
+        <p class="sub">銀行(しみず法人ダイレクト)での手続きは、支払日の3営業日前の午前中です(本人の振込の申請は、その前の日 = 支払日の4営業日前の日の終わりまで)。会社と事務員の都合で、手続きの日より前でも後でも押せます。押したあとは、その支払日の本人の振込の申請は受け付けません(手渡しは受け付けます。「止めた」にすると受け付けに戻ります)。「前渡金の振込手続きを開始」を押すと、会社の PC が前渡金.xls から振込のファイルを作り、銀行で QR の手前まで進めます。最後の QR(トークン)の承認だけは人が行います。銀行で確定したら「銀行で確定しました」を押してください(押さなくても会社の PC が確かめます)。「済み」のあとにもう一度押すと、追加の振込(前の回で振り込んでいない人だけ)になります。</p>
         <label for="trBy">押した人(お名前)</label><input id="trBy" type="text" maxlength="20" autocomplete="off">
         <p id="trMsg" class="msg"></p>
         <div id="trList"></div>
@@ -724,16 +724,24 @@
     }).catch(advErr);
   });
 
-  // ---------- 前渡金の振込(2026-11-12。adminTransferInfo・adminTransferStart・adminTransferStop) ----------
+  // ---------- 前渡金の振込(2026-11-12。adminTransferInfo・adminTransferStart・adminTransferStop。11-18 adminTransferDeclare・追加の振込) ----------
   // 押すとシート「振込依頼」に1行(依頼中)。会社の PC が読んで、前渡金.xls から振込のファイルを作り、ハンズが銀行で QR の手前まで進める。
   // PC が書き戻した状態(受付 → QR待ち → 済み / 止めた)とメモ(例「給与 11件 160,000円・総合 4件 57,800円」)をここに出す
   var trData = null;
   function trErr(e) { msg("trMsg", errText(e), "err"); }
   function trStatusText(t) {
-    var memo = t.memo || "";
+    // 追加の振込(2回目〜。2026-11-18)は頭に付ける。サーバーが最初に入れるメモ「追加の振込(◯回目)」は二重に出さない
+    var extra = t.round > 1 ? "追加の振込(" + t.round + "回目) " : "";
+    var memo = t.memo === "追加の振込(" + t.round + "回目)" ? "" : (t.memo || "");
+    return extra + trStatusBody(t, memo);
+  }
+  function trStatusBody(t, memo) {
     if (t.status === "依頼中") return "依頼中: 会社の PC が受け付けるのを待っています(" + t.at.slice(0, 16) + " " + t.by + " さんが依頼)";
     if (t.status === "受付") return "受付: 会社の PC が振込のファイルを作り、銀行で手続きを進めています" + (memo ? "(" + memo + ")" : "");
     if (t.status === "QR待ち") {
+      // どこからでも確定(2026-11-18 Takeshi): ハンズが取引を確定の手前まで作ってログアウト → 事務員がどの PC からでも銀行にログインして確定
+      var w = trAnywhere(memo);
+      if (w) return "銀行にログインして、作成中の取引" + (w.n ? " " + w.n + "件" : "") + "を確定してください(どの PC からでも)" + (w.rest ? "(" + w.rest + ")" : "");
       // 総合振込 → 給与振込 の順に流し、QR を2回続けて読む(Takeshi 11/12)。PC はメモの先頭に「1/2 総合」「2/2 給与」を書く
       var q = trQrStep(memo);
       if (q) return "QR " + q.step + "(" + q.kind + "振込)を待っています。FuyoメインPC の法人ダイレクトの画面で QR を読み、番号を入れて確定してください" + (q.rest ? "(" + q.rest + ")" : "");
@@ -748,13 +756,44 @@
     var m = String(memo || "").match(/^\s*(\d)\s*\/\s*(\d)\s*(総合|給与)(?:振込)?\s*(.*)$/);
     return m ? { step: m[1] + "/" + m[2], kind: m[3], rest: m[4].trim() } : null;
   }
+  /**
+   * 「どこからでも」の印(2026-11-18): メモに「【どこからでも】」が入っていれば、どの PC からでも確定してよい。
+   * 続けて「取引2件」(または「作成中の取引2件」)があれば件数。例: 「【どこからでも】取引2件 総合 4件 57,800円・給与 11件 160,000円」
+   * → { n: "2", rest: "総合 4件 57,800円・給与 11件 160,000円" }(印がなければ null)
+   */
+  var TR_ANYWHERE = "【どこからでも】";
+  function trAnywhere(memo) {
+    memo = String(memo || "");
+    if (memo.indexOf(TR_ANYWHERE) < 0) return null;
+    var rest = memo.split(TR_ANYWHERE).join(" "), m = rest.match(/(?:作成中の)?取引\s*(\d+)\s*件/);
+    if (m) rest = rest.replace(m[0], " ");
+    return { n: m ? m[1] : "", rest: rest.replace(/^[\s・、,]+|[\s・、,]+$/g, "").replace(/\s{2,}/g, " ") };
+  }
+  /** "2026-11-20 14:05:33" → "11月20日(金) 14時5分" */
+  function trWhen(s) {
+    s = String(s || "");
+    var m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})/);
+    return m ? jpDate(m[1]) + " " + Number(m[2]) + "時" + Number(m[3]) + "分" : s;
+  }
   var TR_BOX = { "依頼中": "note", "受付": "note", "QR待ち": "warnbox", "済み": "note", "止めた": "warnbox ng" };
   function trStatusHtml(t) {
-    var q = t.status === "QR待ち" ? trQrStep(t.memo) : null;
+    var q = t.status === "QR待ち" && !trAnywhere(t.memo) ? trQrStep(t.memo) : null;
     // QR待ちは大きく出す(遠藤さんが離れた所からでも、何回目の QR かが分かるように)
     var big = t.status === "QR待ち" ? "font-size:20px;font-weight:700;line-height:1.5;" : "";
-    return '<div class="' + (TR_BOX[t.status] || "note") + '" style="margin-top:6px;' + big + '" data-trstatus="' + esc(t.status) + '"' + (q ? ' data-qrstep="' + esc(q.step) + '"' : "") + ">" +
+    var html = '<div class="' + (TR_BOX[t.status] || "note") + '" style="margin-top:6px;' + big + '" data-trstatus="' + esc(t.status) + '"' + (q ? ' data-qrstep="' + esc(q.step) + '"' : "") +
+      (t.round > 1 ? ' data-round="' + esc(String(t.round)) + '"' : "") + (t.status === "QR待ち" && trAnywhere(t.memo) ? ' data-anywhere="1"' : "") + ">" +
       esc(trStatusText(t)) + "</div>";
+    // 「銀行で確定しました」の申告(2026-11-18)。状態は会社の PC が銀行の照会で確かめてから「済み」にする
+    if (t.status === "QR待ち" && t.confirmedAt) {
+      html += '<div class="note" style="margin-top:4px" data-trdeclared="1">確定の申告: ' + esc(trWhen(t.confirmedAt)) + " " + esc(t.confirmedBy) +
+        " さん。会社の PC が銀行で確かめると「済み」になります</div>";
+    }
+    return html;
+  }
+  /** 依頼のボタン: 「銀行で確定しました」(QR待ちで、まだ申告していないとき)+「この依頼を止める」 */
+  function trOpenActs(t) {
+    return (t.status === "QR待ち" && !t.confirmedAt ? '<button type="button" class="go" data-act="declare" data-id="' + esc(t.id) + '">銀行で確定しました</button>' : "") +
+      '<button type="button" class="danger" data-act="stop" data-id="' + esc(t.id) + '">この依頼を止める</button>';
   }
   function loadTransfer() {
     return acall("adminTransferInfo").then(function (d) { trData = d; renderTransfer(); }, trErr);
@@ -770,13 +809,14 @@
         "。LINE・電話の分は前渡金.xls から入ります" + (p.until ? "。本人の振込の申請は " + esc(jpDate(p.until)) + " まで" : "") + (p.noTable ? "・祝日の表がない年です(祝日に当たっていないか確かめてください)" : "") + "</div>" +
         (p.open ? trStatusHtml(p.open) : p.latest ? trStatusHtml(p.latest) : "") +
         '<div class="acts">' + (p.open
-          ? '<button type="button" class="danger" data-act="stop" data-id="' + esc(p.open.id) + '">この依頼を止める</button>'
-          : '<button type="button" class="go" data-act="start" data-date="' + esc(p.date) + '">前渡金の振込手続きを開始</button>') + "</div></div>";
+          ? trOpenActs(p.open)
+          : '<button type="button" class="go" data-act="start" data-date="' + esc(p.date) + '">前渡金の振込手続きを開始' +
+            (p.nextRound > 1 ? "(追加の振込・" + p.nextRound + "回目)" : "") + "</button>") + "</div></div>";
     }).join("");
     if (d.others.length) {
       html += "<h3>ほかの支払日の終わっていない依頼</h3>" + d.others.map(function (t) {
         return '<div class="item"><div class="top"><b>支払日 ' + esc(jpDate(t.date)) + "</b><span>銀行での手続き " + esc(jpDate(t.bankDue)) + " 午前中</span></div>" + trStatusHtml(t) +
-          '<div class="acts"><button type="button" class="danger" data-act="stop" data-id="' + esc(t.id) + '">この依頼を止める</button></div></div>';
+          '<div class="acts">' + trOpenActs(t) + "</div></div>";
       }).join("");
     }
     $("trList").innerHTML = html || '<p class="sub">支払日が見つかりません</p>';
@@ -787,10 +827,12 @@
       if (!p) return;
       var by = $("trBy").value.trim();
       if (!by) { msg("trMsg", "押した人のお名前を入れてください", "err"); return; }
-      var warn = (trData.today > p.bankDue ? "\n\n※ 銀行での手続きの日(" + jpDate(p.bankDue) + " 午前中)を過ぎています。支払日に間に合わないことがあります" : "") +
+      var warn = (trData.today > p.bankDue ? "\n\n※ 銀行での手続きの日(" + jpDate(p.bankDue) + " 午前中)を過ぎています。支払日に間に合わないことがあります" : "");
+      // 追加の振込(2026-11-18): 前の回が済み → 会社の PC が振込済の台帳で、前の回で振り込んだ人を外して作る
+      var extra = p.lastDone ? "\n\n追加の振込(" + (p.nextRound || 2) + "回目)\n前の回: 済み(" + trWhen(p.lastDone.updated) + ")。今回は、前の回で振り込んでいない人だけで作ります" :
         (p.done ? "\n\n※ この支払日はすでに「済み」の依頼があります。追加の分だけを振り込むときに押してください" : "");
-      if (!confirm("前渡金の振込手続きを開始しますか？\n\n支払日: " + jpDate(p.date) + "\n銀行での手続き: " + jpDate(p.bankDue) + " 午前中\n端末で承認済みの振込: " + p.people + "人 合計 " + yen(p.total) +
-        "\nLINE・電話の分は前渡金.xls から入ります。\n押したあとは、この支払日の本人の振込の申請は受け付けません(手渡しは受け付けます)。\n\nOK を押すと会社の PC が銀行で QR の手前まで進めます。最後の QR の承認は人が行います。" + warn)) return;
+      if (!confirm("前渡金の振込手続きを開始しますか？" + extra + "\n\n支払日: " + jpDate(p.date) + "\n銀行での手続き: " + jpDate(p.bankDue) + " 午前中\n端末で承認済みの振込: " + p.people + "人 合計 " + yen(p.total) +
+        (p.lastDone ? "(前の回の分も含む)" : "") + "\nLINE・電話の分は前渡金.xls から入ります。\n押したあとは、この支払日の本人の振込の申請は受け付けません(手渡しは受け付けます)。\n\nOK を押すと会社の PC が銀行で QR の手前まで進めます。最後の QR の承認は人が行います。" + warn)) return;
       msg("trMsg", "");
       acall("adminTransferStart", date, by, newReqId()).then(function () {
         msg("trMsg", jpDate(date) + " 支払いの振込手続きを依頼しました。会社の PC が受け付けると、ここに状態が出ます(「読み直す」で更新)", "ok");
@@ -804,6 +846,17 @@
       if (why === null) return;
       acall("adminTransferStop", da(b, "id"), by, why).then(function () { msg("trMsg", "依頼を止めました", "ok"); return loadTransfer(); })
         .catch(function (e) { trErr(e); loadTransfer(); });
+    },
+    // 「銀行で確定しました」(2026-11-18 Takeshi): 状態は変えず、確定の申告(時刻・押した人)だけ付ける。会社の PC が銀行の照会で確かめて「済み」にする
+    declare: function (b) {
+      var by = $("trBy").value.trim();
+      if (!by) { msg("trMsg", "押した人のお名前を入れてください", "err"); return; }
+      if (!confirm("銀行で、作成中の取引をすべて確定しましたか？\n\n押すと、会社の PC に「確定しました」と伝えます。会社の PC が銀行で確かめると「済み」になります。\nまだ確定していない取引があるときは押さないでください")) return;
+      msg("trMsg", "");
+      acall("adminTransferDeclare", da(b, "id"), by, newReqId()).then(function () {
+        msg("trMsg", "「銀行で確定しました」を会社の PC に伝えました。会社の PC が銀行で確かめると「済み」になります(「読み直す」で更新)", "ok");
+        return loadTransfer();
+      }).catch(function (e) { trErr(e); loadTransfer(); });
     }
   });
 
